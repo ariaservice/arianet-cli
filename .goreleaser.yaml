@@ -1,0 +1,107 @@
+version: 2
+
+project_name: arianet
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: arianet
+    main: ./cmd/arianet
+    binary: arianet
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/arianet/arianet-cli/pkg/version.Version={{.Version}}
+      - -X github.com/arianet/arianet-cli/pkg/version.Commit={{.ShortCommit}}
+      - -X github.com/arianet/arianet-cli/pkg/version.BuildDate={{.Date}}
+
+archives:
+  - id: arianet
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - completions/*
+
+checksum:
+  name_template: "checksums.txt"
+
+# Shell completions
+after_hooks:
+  - mkdir -p completions
+  - ./bin/arianet completion bash  > completions/arianet.bash  || true
+  - ./bin/arianet completion zsh   > completions/_arianet      || true
+  - ./bin/arianet completion fish  > completions/arianet.fish  || true
+
+# Homebrew tap
+brews:
+  - name: arianet-cli
+    repository:
+      owner: arianet
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://arianet.ir"
+    description: "Official CLI for the Arianet cloud platform"
+    license: "Proprietary"
+    install: |
+      bin.install "arianet"
+      bash_completion.install "completions/arianet.bash" => "arianet"
+      zsh_completion.install "completions/_arianet"
+      fish_completion.install "completions/arianet.fish"
+    test: |
+      system "#{bin}/arianet version"
+
+# .deb and .rpm packages (Linux)
+nfpms:
+  - id: arianet-packages
+    package_name: arianet-cli
+    vendor: Arianet
+    homepage: https://arianet.ir
+    maintainer: Arianet <support@arianet.ir>
+    description: Official CLI for the Arianet cloud platform
+    license: Proprietary
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: completions/arianet.bash
+        dst: /etc/bash_completion.d/arianet
+      - src: completions/_arianet
+        dst: /usr/share/zsh/vendor-completions/_arianet
+      - src: completions/arianet.fish
+        dst: /usr/share/fish/completions/arianet.fish
+
+# GitHub release
+release:
+  github:
+    owner: arianet
+    name: arianet-cli
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch

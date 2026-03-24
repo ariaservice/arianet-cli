@@ -48,12 +48,11 @@ func newRegionCmd() *cobra.Command {
 				rows[i] = []string{
 					strconv.Itoa(r.ID),
 					r.Name,
-					r.FriendlyName,
-					r.CountryCode,
-					printer.StatusColor(r.Status),
+					derefStr(r.DisplayName),
+					derefStr(r.Country),
 				}
 			}
-			p.Table([]string{"ID", "Name", "Friendly Name", "Country", "Status"}, rows)
+			p.Table([]string{"ID", "Name", "Display Name", "Country"}, rows)
 			return nil
 		},
 	})

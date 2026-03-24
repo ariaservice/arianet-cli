@@ -79,21 +79,16 @@ func newOSCmd() *cobra.Command {
 }
 
 func osHeaders() []string {
-	return []string{"ID", "Name", "Region ID", "Status"}
+	return []string{"ID", "Name", "Region ID"}
 }
 
 func osRows(templates []api.OSTemplate) [][]string {
 	rows := make([][]string, len(templates))
 	for i, t := range templates {
-		status := printer.BoolCheck(t.Status)
-		if !t.Status {
-			status = printer.Dim("inactive")
-		}
 		rows[i] = []string{
 			strconv.Itoa(t.ID),
 			t.Name,
-			strconv.Itoa(t.DatacenterID),
-			status,
+			func() string { if t.RegionID == nil { return "-" }; return strconv.Itoa(*t.RegionID) }(),
 		}
 	}
 	return rows

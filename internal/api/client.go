@@ -225,8 +225,8 @@ func (c *Client) PowerOffService(id int) error {
 	return c.post(fmt.Sprintf("/servers/%d/power-off", id), nil, nil)
 }
 
-func (c *Client) RenameService(id int, hostname string) error {
-	return c.post(fmt.Sprintf("/servers/%d/rename", id), map[string]string{"hostname": hostname}, nil)
+func (c *Client) RenameService(id int, name string) error {
+	return c.post(fmt.Sprintf("/servers/%d/rename", id), map[string]string{"name": name}, nil)
 }
 
 func (c *Client) ReinstallService(id, osID int) error {

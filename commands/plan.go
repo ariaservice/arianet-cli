@@ -120,13 +120,14 @@ func newPlanGetCmd() *cobra.Command {
 				return nil
 			}
 
-			region := printer.Dim("—")
+			region := "-"
 			if plan.Datacenter != nil {
-				region = fmt.Sprintf("%s (%s)", plan.Datacenter.Name, plan.Datacenter.CountryCode)
-			}
-			price := printer.Dim("—")
-			if plan.DollarPrice > 0 {
-				price = fmt.Sprintf("$%.4f / %s", plan.DollarPrice, plan.BillingCycle)
+				country := derefStr(plan.Datacenter.Country)
+				if country != "" {
+					region = fmt.Sprintf("%s (%s)", plan.Datacenter.Name, country)
+				} else {
+					region = plan.Datacenter.Name
+				}
 			}
 
 			p.Table(
@@ -135,24 +136,26 @@ func newPlanGetCmd() *cobra.Command {
 					{"ID", strconv.Itoa(plan.ID)},
 					{"Name", printer.Bold(plan.Name)},
 					{"Region", region},
-					{"Billing Cycle", plan.BillingCycle},
-					{"Price (USD)", price},
-					{"Recommended", printer.BoolCheck(plan.IsRecommended)},
+					{"Billing Cycle", derefStr(plan.Cycle)},
+					{"Recommended", printer.BoolCheck(plan.Recommended)},
 				},
 			)
 
 			if len(plan.Prices) > 0 {
 				fmt.Println()
-				fmt.Println(printer.Bold("Local Pricing:"))
+				fmt.Println(printer.Bold("Pricing:"))
 				rows := make([][]string, len(plan.Prices))
 				for i, pr := range plan.Prices {
-					rows[i] = []string{
-						pr.CurrencyCode,
-						pr.CurrencyName,
-						fmt.Sprintf("%.2f", pr.Price),
+					hourly, monthly := "-", "-"
+					if pr.Hourly != nil {
+						hourly = fmt.Sprintf("%.4f", *pr.Hourly)
 					}
+					if pr.Monthly != nil {
+						monthly = fmt.Sprintf("%.2f", *pr.Monthly)
+					}
+					rows[i] = []string{pr.Code, pr.Currency, hourly, monthly}
 				}
-				p.Table([]string{"Currency Code", "Currency", "Price"}, rows)
+				p.Table([]string{"Code", "Currency", "Hourly", "Monthly"}, rows)
 			}
 			return nil
 		},
@@ -160,28 +163,23 @@ func newPlanGetCmd() *cobra.Command {
 }
 
 func planHeaders() []string {
-	return []string{"ID", "Name", "Region", "Billing", "Price (USD)", "Recommended"}
+	return []string{"ID", "Name", "Region", "Billing", "Recommended"}
 }
 
 func planToRow(pl api.Plan) []string {
-	region := printer.Dim("—")
+	region := "-"
 	if pl.Datacenter != nil {
 		region = pl.Datacenter.Name
 	}
-	price := printer.Dim("—")
-	if pl.DollarPrice > 0 {
-		price = fmt.Sprintf("$%.4f", pl.DollarPrice)
-	}
-	rec := printer.Dim("–")
-	if pl.IsRecommended {
+	rec := "-"
+	if pl.Recommended {
 		rec = printer.BoolCheck(true)
 	}
 	return []string{
 		strconv.Itoa(pl.ID),
 		pl.Name,
 		region,
-		pl.BillingCycle,
-		price,
+		derefStr(pl.Cycle),
 		rec,
 	}
 }

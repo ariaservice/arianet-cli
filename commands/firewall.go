@@ -61,13 +61,12 @@ func newFirewallListCmd() *cobra.Command {
 			for i, fw := range firewalls {
 				rows[i] = []string{
 					strconv.Itoa(fw.ID),
-					fw.Name,
-					strconv.Itoa(fw.DatacenterID),
+					derefStr(fw.Name),
 					strconv.Itoa(len(fw.Rules)),
 					fw.CreatedAt,
 				}
 			}
-			p.Table([]string{"ID", "Name", "Region ID", "Rules", "Created"}, rows)
+			p.Table([]string{"ID", "Name", "Rules", "Created"}, rows)
 			return nil
 		},
 	}
@@ -104,8 +103,8 @@ func newFirewallGetCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Printf("%s %s\n", printer.Bold("Firewall:"), printer.Cyan(fw.Name))
-			fmt.Printf("  ID: %d  |  Region ID: %d  |  Created: %s\n\n", fw.ID, fw.DatacenterID, fw.CreatedAt)
+			fmt.Printf("%s %s\n", printer.Bold("Firewall:"), printer.Cyan(derefStr(fw.Name)))
+			fmt.Printf("  ID: %d  |  Created: %s\n\n", fw.ID, fw.CreatedAt)
 
 			if len(fw.Rules) == 0 {
 				printer.Info("No rules configured.")
@@ -155,14 +154,14 @@ func newFirewallCreateCmd() *cobra.Command {
 
 			fw, err := client.CreateFirewall(api.CreateFirewallRequest{
 				Name:         name,
-				DatacenterID: datacenterID,
+				DatacenterID: optIntPtr(datacenterID),
 			})
 			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Firewall %q created (ID: %d)", fw.Name, fw.ID))
+			printer.Success(fmt.Sprintf("Firewall %q created (ID: %d)", derefStr(fw.Name), fw.ID))
 			printer.Info(fmt.Sprintf("Add rules with: arianet firewall rule add %d --direction inbound --proto tcp --port 80 --source 0.0.0.0/0 --action allow", fw.ID))
 			return nil
 		},

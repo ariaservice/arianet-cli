@@ -48,18 +48,25 @@ func newWhoamiCmd() *cobra.Command {
 			}
 
 			verified := printer.Dim("–")
-			if user.IsVerified {
+			if user.Verified {
 				verified = printer.BoolCheck(true)
 			}
+			email := derefStr(user.Email)
+			if email == "" {
+				email = printer.Dim("—")
+			}
+			mobile := derefStr(user.Mobile)
+			if mobile == "" {
+				mobile = printer.Dim("—")
+			}
 			p.Table(
-				[]string{"ID", "Email", "Mobile", "Status", "Verified", "Member Since"},
+				[]string{"ID", "Email", "Mobile", "Status", "Verified"},
 				[][]string{{
 					strconv.Itoa(user.ID),
-					user.Email,
-					user.Mobile,
+					email,
+					mobile,
 					printer.StatusColor(user.Status),
 					verified,
-					user.CreatedAt,
 				}},
 			)
 			return nil
@@ -143,11 +150,11 @@ func newTokenCmd() *cobra.Command {
 
 			rows := make([][]string, len(tokens))
 			for i, t := range tokens {
-				lastUsed := t.LastUsedAt
+				lastUsed := derefStr(t.LastUsed)
 				if lastUsed == "" {
 					lastUsed = printer.Dim("never")
 				}
-				expiresAt := t.ExpiresAt
+				expiresAt := derefStr(t.Expires)
 				if expiresAt == "" {
 					expiresAt = printer.Dim("never")
 				}

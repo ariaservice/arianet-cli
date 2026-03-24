@@ -22,3 +22,35 @@ func confirm(prompt string) bool {
 func saveConfig() error {
 	return config.Save(cfg)
 }
+
+// derefStr safely dereferences a *string, returning "" if nil.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// derefBool safely dereferences a *bool, returning false if nil.
+func derefBool(b *bool) bool {
+	if b == nil {
+		return false
+	}
+	return *b
+}
+
+// optIntPtr returns a *int pointer if v > 0, otherwise nil.
+func optIntPtr(v int) *int {
+	if v == 0 {
+		return nil
+	}
+	return &v
+}
+
+// optStrPtr returns a *string pointer if s != "", otherwise nil.
+func optStrPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}

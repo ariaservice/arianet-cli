@@ -41,15 +41,27 @@ func newBalanceCmd() *cobra.Command {
 
 			rows := make([][]string, len(data.Wallets))
 			for i, w := range data.Wallets {
-				defaultLabel := printer.Dim("–")
-				if w.IsDefault {
+				defaultLabel := "-"
+				if w.Primary {
 					defaultLabel = printer.BoolCheck(true)
+				}
+				symbol := ""
+				code := ""
+				name := ""
+				if w.Currency != nil {
+					symbol = derefStr(w.Currency.Symbol)
+					code = w.Currency.Code
+					name = w.Currency.Name
+				}
+				balanceStr := fmt.Sprintf("%.2f", w.Balance)
+				if symbol != "" {
+					balanceStr += " " + symbol
 				}
 				rows[i] = []string{
 					fmt.Sprintf("%d", w.ID),
-					fmt.Sprintf("%.2f %s", w.Balance, w.Currency.Symbol),
-					w.Currency.Code,
-					w.Currency.Name,
+					balanceStr,
+					code,
+					name,
 					printer.StatusColor(w.Status),
 					defaultLabel,
 				}
@@ -105,12 +117,20 @@ func newTransactionsCmd() *cobra.Command {
 
 			rows := make([][]string, len(txs))
 			for i, tx := range txs {
+				symbol := ""
+				if tx.Currency != nil {
+					symbol = derefStr(tx.Currency.Symbol)
+				}
+				amountStr := fmt.Sprintf("%.2f", tx.Amount)
+				if symbol != "" {
+					amountStr += " " + symbol
+				}
 				rows[i] = []string{
 					fmt.Sprintf("%d", tx.ID),
-					fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency.Symbol),
+					amountStr,
 					tx.Mode,
-					tx.Type,
-					printer.StatusColor(tx.Status),
+					derefStr(tx.Type),
+					derefStr(tx.Status),
 					tx.CreatedAt,
 				}
 			}
@@ -120,10 +140,9 @@ func newTransactionsCmd() *cobra.Command {
 			)
 
 			if pagination != nil {
-				fmt.Printf("\n%s\n", printer.Dim(fmt.Sprintf(
-					"Page %d of %d  ·  %d total transactions",
+				fmt.Printf("\nPage %d of %d  -  %d total transactions\n",
 					pagination.CurrentPage, pagination.LastPage, pagination.Total,
-				)))
+				)
 			}
 			return nil
 		},

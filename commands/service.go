@@ -112,29 +112,34 @@ func newServiceListCmd() *cobra.Command {
 				ip := s.PrimaryIP()
 				if ip == "" {
 					ip = printer.Dim("pending")
-				} else {
-					ip = printer.Cyan(ip)
 				}
 
-				// Show hostname or ID
-				hostname := s.Hostname
+				hostname := derefStr(s.Hostname)
 				if hostname == "" {
 					hostname = printer.Dim(fmt.Sprintf("(ID: %d)", s.ID))
-				} else {
-					hostname = printer.Bold(hostname)
 				}
 
-				// Provider status
-				providerStatus := s.ProviderServiceStatus
+				providerStatus := derefStr(s.InstanceStatus)
 				if providerStatus == "" {
-					providerStatus = printer.Dim("—")
-				} else {
-					providerStatus = printer.StatusBadge(providerStatus)
+					providerStatus = printer.Dim("-")
 				}
 
-				protected := printer.Dim("–")
-				if s.IsProtected {
+				protected := printer.Dim("-")
+				if derefBool(s.Protected) {
 					protected = printer.BoolCheck(true)
+				}
+
+				planName := ""
+				if s.Plan != nil {
+					planName = s.Plan.Name
+				}
+				dcName := ""
+				if s.Datacenter != nil {
+					dcName = s.Datacenter.Name
+				}
+				osName := ""
+				if s.OS != nil {
+					osName = s.OS.Name
 				}
 
 				rows[i] = []string{
@@ -143,9 +148,9 @@ func newServiceListCmd() *cobra.Command {
 					printer.StatusBadge(s.Status),
 					providerStatus,
 					ip,
-					s.Plan.Name,
-					s.Datacenter.Name,
-					s.OS.Name,
+					planName,
+					dcName,
+					osName,
 					protected,
 				}
 			}
@@ -160,7 +165,7 @@ func newServiceListCmd() *cobra.Command {
 				printer.PaginationFooter(
 					pagination.CurrentPage,
 					pagination.LastPage,
-					pagination.Total,
+					int(pagination.Total),
 					"servers",
 				)
 			}
@@ -210,18 +215,31 @@ func newServiceGetCmd() *cobra.Command {
 				ip = printer.Dim("—")
 			}
 
+			planStr := "-"
+			if s.Plan != nil {
+				planStr = fmt.Sprintf("%s (ID: %d)", s.Plan.Name, s.Plan.ID)
+			}
+			dcStr := "-"
+			if s.Datacenter != nil {
+				dcStr = fmt.Sprintf("%s (ID: %d)", s.Datacenter.Name, s.Datacenter.ID)
+			}
+			osStr := "-"
+			if s.OS != nil {
+				osStr = fmt.Sprintf("%s (ID: %d)", s.OS.Name, s.OS.ID)
+			}
+
 			p.Table(
 				[]string{"Field", "Value"},
 				[][]string{
 					{"ID", strconv.Itoa(s.ID)},
-					{"Hostname", printer.Bold(s.Hostname)},
+					{"Hostname", derefStr(s.Hostname)},
 					{"Status", printer.StatusColor(s.Status)},
-					{"Protected", printer.BoolCheck(s.IsProtected)},
-					{"Billing Cycle", s.BillingCycle},
+					{"Protected", printer.BoolCheck(derefBool(s.Protected))},
+					{"Billing Cycle", derefStr(s.Cycle)},
 					{"IP Address", ip},
-					{"Plan", fmt.Sprintf("%s (ID: %d)", s.Plan.Name, s.Plan.ID)},
-					{"Region", fmt.Sprintf("%s (ID: %d)", s.Datacenter.Name, s.Datacenter.ID)},
-					{"OS", fmt.Sprintf("%s (ID: %d)", s.OS.Name, s.OS.ID)},
+					{"Plan", planStr},
+					{"Region", dcStr},
+					{"OS", osStr},
 					{"Created At", s.CreatedAt},
 				},
 			)
@@ -236,8 +254,6 @@ func newServiceCreateCmd() *cobra.Command {
 		datacenterID int
 		osID         int
 		hostname     string
-		sshKeyID     int
-		firewallID   int
 		yes          bool
 		noWatch      bool
 	)
@@ -286,10 +302,8 @@ selecting a region, plan, OS template, and hostname.`,
 			req := api.CreateServiceRequest{
 				PlanID:       planID,
 				DatacenterID: datacenterID,
-				OSID:         osID,
+				OsID:         osID,
 				Hostname:     hostname,
-				SSHKeyID:     sshKeyID,
-				FirewallID:   firewallID,
 			}
 
 			created, err := client.CreateService(req)
@@ -313,8 +327,6 @@ selecting a region, plan, OS template, and hostname.`,
 	cmd.Flags().IntVar(&datacenterID, "region", 0, "datacenter/region ID (see: arianet region list)")
 	cmd.Flags().IntVar(&osID, "os", 0, "OS template ID (see: arianet os list)")
 	cmd.Flags().StringVar(&hostname, "hostname", "", "hostname for the server")
-	cmd.Flags().IntVar(&sshKeyID, "ssh-key", 0, "SSH key ID to install (optional)")
-	cmd.Flags().IntVar(&firewallID, "firewall", 0, "firewall ID to attach (optional)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
 	cmd.Flags().BoolVar(&noWatch, "no-watch", false, "skip status monitoring after creation")
 
@@ -335,12 +347,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 		if err != nil {
 			return 0, 0, 0, "", fmt.Errorf("could not fetch regions: %w", err)
 		}
-		active := make([]api.Region, 0)
-		for _, r := range regions {
-			if r.Status == "active" {
-				active = append(active, r)
-			}
-		}
+		active := regions
 		if len(active) == 0 {
 			return 0, 0, 0, "", fmt.Errorf("no active regions available")
 		}
@@ -348,11 +355,11 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 		fmt.Println("\n  Step 1 of 4 — Select a Region")
 		fmt.Println()
 		for i, r := range active {
-			fmt.Printf("    %2d)  %s  (ID: %d)\n", i+1, wizardPad(r.FriendlyName, 28), r.ID)
+			fmt.Printf("    %2d)  %s  (ID: %d)\n", i+1, wizardPad(derefStr(r.DisplayName), 28), r.ID)
 		}
 		choice := wizardPromptInt(reader, "\n  Enter number", 1, len(active))
 		datacenterID = active[choice-1].ID
-		fmt.Printf("  -> Region: %s\n", active[choice-1].FriendlyName)
+		fmt.Printf("  -> Region: %s\n", derefStr(active[choice-1].DisplayName))
 	}
 
 	// Step 2: Plan
@@ -379,11 +386,11 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 		fmt.Println()
 		for i, p := range plans {
 			price := ""
-			if p.DollarPrice > 0 {
-				price = fmt.Sprintf("  $%.2f/mo", p.DollarPrice)
+			if len(p.Prices) > 0 && p.Prices[0].Monthly != nil {
+				price = fmt.Sprintf("  %.2f/mo", *p.Prices[0].Monthly)
 			}
 			rec := ""
-			if p.IsRecommended {
+			if p.Recommended {
 				rec = "  [recommended]"
 			}
 			fmt.Printf("    %2d)  %s (ID: %d)%s%s\n", i+1, wizardPad(p.Name, 28), p.ID, price, rec)
@@ -402,12 +409,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 				return 0, 0, 0, "", fmt.Errorf("could not fetch OS templates: %w", err)
 			}
 		}
-		active := make([]api.OSTemplate, 0)
-		for _, t := range templates {
-			if t.Status {
-				active = append(active, t)
-			}
-		}
+		active := templates
 		if len(active) == 0 {
 			return 0, 0, 0, "", fmt.Errorf("no OS templates available")
 		}
@@ -635,16 +637,11 @@ func newServiceStatusCmd() *cobra.Command {
 				return nil
 			}
 
-			running := "No"
-			if status.IsRunning {
-				running = printer.BoolCheck(true) + " Yes"
-			}
-
 			p.Table(
 				[]string{"Field", "Value"},
 				[][]string{
 					{"Status", printer.StatusColor(status.Status)},
-					{"Running", running},
+					{"Instance Status", status.InstanceStatus},
 				},
 			)
 			return nil

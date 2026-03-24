@@ -63,12 +63,11 @@ func newSSHListCmd() *cobra.Command {
 			for i, k := range keys {
 				rows[i] = []string{
 					strconv.Itoa(k.ID),
-					k.Name,
-					k.Fingerprint,
+					derefStr(k.Name),
 					k.CreatedAt,
 				}
 			}
-			p.Table([]string{"ID", "Name", "Fingerprint", "Created"}, rows)
+			p.Table([]string{"ID", "Name", "Created"}, rows)
 			return nil
 		},
 	}
@@ -105,7 +104,7 @@ func newSSHGetCmd() *cobra.Command {
 				return nil
 			}
 
-			pubKey := key.PublicKey
+			pubKey := key.Key
 			if len(pubKey) > 60 {
 				pubKey = pubKey[:57] + "..."
 			}
@@ -114,8 +113,7 @@ func newSSHGetCmd() *cobra.Command {
 				[]string{"Field", "Value"},
 				[][]string{
 					{"ID", strconv.Itoa(key.ID)},
-					{"Name", printer.Bold(key.Name)},
-					{"Fingerprint", key.Fingerprint},
+					{"Name", printer.Bold(derefStr(key.Name))},
 					{"Public Key", printer.Dim(pubKey)},
 					{"Created At", key.CreatedAt},
 				},
@@ -164,7 +162,7 @@ func newSSHAddCmd() *cobra.Command {
 			req := api.CreateSSHKeyRequest{
 				Name:         name,
 				PublicKey:    keyValue,
-				DatacenterID: datacenterID,
+				DatacenterID: optIntPtr(datacenterID),
 			}
 
 			key, err := client.CreateSSHKey(req)
@@ -173,7 +171,7 @@ func newSSHAddCmd() *cobra.Command {
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("SSH key %q added (ID: %d, fingerprint: %s)", key.Name, key.ID, key.Fingerprint))
+			printer.Success(fmt.Sprintf("SSH key %q added (ID: %d)", derefStr(key.Name), key.ID))
 			return nil
 		},
 	}
@@ -208,13 +206,13 @@ func newSSHUpdateCmd() *cobra.Command {
 				return nil
 			}
 
-			key, err := client.UpdateSSHKey(id, api.UpdateSSHKeyRequest{Name: name})
+			key, err := client.UpdateSSHKey(id, api.UpdateSSHKeyRequest{Name: optStrPtr(name)})
 			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("SSH key #%d updated to %q.", key.ID, key.Name))
+			printer.Success(fmt.Sprintf("SSH key #%d updated to %q.", key.ID, derefStr(key.Name)))
 			return nil
 		},
 	}

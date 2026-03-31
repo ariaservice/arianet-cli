@@ -365,11 +365,8 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 	// Step 2: Plan
 	if planID == 0 {
 		allPlans, err := client.ListPlansByDatacenter(datacenterID)
-		if err != nil || len(allPlans) == 0 {
-			allPlans, err = client.ListPlans()
-			if err != nil {
-				return 0, 0, 0, "", fmt.Errorf("could not fetch plans: %w", err)
-			}
+		if err != nil {
+			return 0, 0, 0, "", fmt.Errorf("could not fetch plans: %w", err)
 		}
 		// Filter out plans with no name
 		plans := make([]api.Plan, 0, len(allPlans))
@@ -403,11 +400,8 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 	// Step 3: OS
 	if osID == 0 {
 		templates, err := client.ListOSByDatacenter(datacenterID)
-		if err != nil || len(templates) == 0 {
-			templates, err = client.ListOS()
-			if err != nil {
-				return 0, 0, 0, "", fmt.Errorf("could not fetch OS templates: %w", err)
-			}
+		if err != nil {
+			return 0, 0, 0, "", fmt.Errorf("could not fetch OS templates: %w", err)
 		}
 		active := templates
 		if len(active) == 0 {

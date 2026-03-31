@@ -147,12 +147,6 @@ func (c *Client) ListRegions() ([]Region, error) {
 
 // ─── OS Templates ─────────────────────────────────────────────────────────────
 
-func (c *Client) ListOS() ([]OSTemplate, error) {
-	var data OSData
-	_, err := c.get("/os", &data)
-	return data.OSTemplates, err
-}
-
 func (c *Client) ListOSByDatacenter(datacenterID int) ([]OSTemplate, error) {
 	var data OSData
 	_, err := c.get(fmt.Sprintf("/os/datacenter/%d", datacenterID), &data)
@@ -161,12 +155,6 @@ func (c *Client) ListOSByDatacenter(datacenterID int) ([]OSTemplate, error) {
 
 // ─── Plans ────────────────────────────────────────────────────────────────────
 
-func (c *Client) ListPlans() ([]Plan, error) {
-	var data PlansData
-	_, err := c.get("/plans", &data)
-	return data.Plans, err
-}
-
 func (c *Client) GetPlan(id int) (*Plan, error) {
 	var plan Plan
 	_, err := c.get(fmt.Sprintf("/plans/%d", id), &plan)
@@ -174,9 +162,21 @@ func (c *Client) GetPlan(id int) (*Plan, error) {
 }
 
 func (c *Client) ListPlansByDatacenter(datacenterID int) ([]Plan, error) {
-	var data PlansData
+	groups, err := c.ListPlansByDatacenterGrouped(datacenterID)
+	if err != nil {
+		return nil, err
+	}
+	var plans []Plan
+	for _, g := range groups {
+		plans = append(plans, g.Plans...)
+	}
+	return plans, nil
+}
+
+func (c *Client) ListPlansByDatacenterGrouped(datacenterID int) ([]PlanGroup, error) {
+	var data PlansGroupedData
 	_, err := c.get(fmt.Sprintf("/plans/datacenter/%d", datacenterID), &data)
-	return data.Plans, err
+	return data.Groups, err
 }
 
 // ─── Services ─────────────────────────────────────────────────────────────────

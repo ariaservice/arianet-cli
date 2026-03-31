@@ -77,14 +77,21 @@ type OSData struct {
 
 // ─── Plan ────────────────────────────────────────────────────────────────────
 
+type ResourceValue struct {
+	Size int    `json:"size"`
+	Unit string `json:"unit"`
+}
+
 type Plan struct {
-	ID          int                    `json:"id"`
-	Name        string                 `json:"name"`
-	Recommended bool                   `json:"recommended"`
-	Cycle       *string                `json:"cycle"`
-	Specs       map[string]interface{} `json:"specs,omitempty"`
-	Datacenter  *DatacenterRef         `json:"datacenter"`
-	Prices      []PlanPrice            `json:"prices,omitempty"`
+	ID          int            `json:"id"`
+	Name        string         `json:"name"`
+	DisplayName string         `json:"display_name"`
+	Recommended bool           `json:"recommended"`
+	Cycle       *string        `json:"cycle"`
+	CPU         *ResourceValue `json:"cpu,omitempty"`
+	RAM         *ResourceValue `json:"ram,omitempty"`
+	Storage     *ResourceValue `json:"storage,omitempty"`
+	Prices      []PlanPrice    `json:"prices,omitempty"`
 }
 
 type PlanPrice struct {
@@ -95,8 +102,14 @@ type PlanPrice struct {
 	Yearly   *float64 `json:"yearly,omitempty"`
 }
 
-type PlansData struct {
+type PlanGroup struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
 	Plans []Plan `json:"plans"`
+}
+
+type PlansGroupedData struct {
+	Groups []PlanGroup `json:"groups"`
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────

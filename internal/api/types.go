@@ -96,11 +96,11 @@ type Plan struct {
 }
 
 type PlanPrice struct {
-	Code     string   `json:"code"`
-	Currency string   `json:"currency"`
-	Hourly   *float64 `json:"hourly"`
-	Monthly  *float64 `json:"monthly"`
-	Yearly   *float64 `json:"yearly,omitempty"`
+	Code     string `json:"code"`
+	Currency string `json:"currency"`
+	Hourly   string `json:"hourly"`
+	Monthly  string `json:"monthly"`
+	Yearly   string `json:"yearly,omitempty"`
 }
 
 type PlanGroup struct {

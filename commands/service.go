@@ -383,8 +383,8 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 		fmt.Println()
 		for i, p := range plans {
 			price := ""
-			if len(p.Prices) > 0 && p.Prices[0].Monthly != nil {
-				price = fmt.Sprintf("  %.2f/mo", *p.Prices[0].Monthly)
+			if len(p.Prices) > 0 && p.Prices[0].Monthly != "" {
+				price = fmt.Sprintf("  %s/mo", p.Prices[0].Monthly)
 			}
 			rec := ""
 			if p.Recommended {

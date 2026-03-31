@@ -193,11 +193,11 @@ func newPlanGetCmd() *cobra.Command {
 				rows := make([][]string, len(plan.Prices))
 				for i, pr := range plan.Prices {
 					hourly, monthly := "-", "-"
-					if pr.Hourly != nil {
-						hourly = fmt.Sprintf("%.4f", *pr.Hourly)
+					if pr.Hourly != "" {
+						hourly = pr.Hourly
 					}
-					if pr.Monthly != nil {
-						monthly = fmt.Sprintf("%.2f", *pr.Monthly)
+					if pr.Monthly != "" {
+						monthly = pr.Monthly
 					}
 					rows[i] = []string{pr.Code, pr.Currency, hourly, monthly}
 				}
@@ -224,11 +224,11 @@ func planToRow(pl api.Plan) []string {
 	if len(pl.Prices) > 0 {
 		pr := pl.Prices[0]
 		currency = pr.Code
-		if pr.Hourly != nil {
-			hourly = fmt.Sprintf("%.0f", *pr.Hourly)
+		if pr.Hourly != "" {
+			hourly = pr.Hourly
 		}
-		if pr.Monthly != nil {
-			monthly = fmt.Sprintf("%.0f", *pr.Monthly)
+		if pr.Monthly != "" {
+			monthly = pr.Monthly
 		}
 	}
 	return []string{

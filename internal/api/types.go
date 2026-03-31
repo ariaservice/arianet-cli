@@ -66,9 +66,10 @@ type RegionsData struct {
 // ─── OS Template ─────────────────────────────────────────────────────────────
 
 type OSTemplate struct {
-	ID       int  `json:"id"`
-	Name     string `json:"name"`
-	RegionID *int   `json:"region_id"`
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	RegionID    int    `json:"region_id"`
 }
 
 type OSData struct {

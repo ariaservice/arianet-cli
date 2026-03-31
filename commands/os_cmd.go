@@ -127,21 +127,19 @@ func newOSCmd() *cobra.Command {
 }
 
 func osHeaders() []string {
-	return []string{"ID", "Name", "Region ID"}
+	return []string{"ID", "Name"}
 }
 
 func osRows(templates []api.OSTemplate) [][]string {
 	rows := make([][]string, len(templates))
 	for i, t := range templates {
+		name := t.Name
+		if t.DisplayName != "" && t.DisplayName != t.Name {
+			name = t.DisplayName
+		}
 		rows[i] = []string{
 			strconv.Itoa(t.ID),
-			t.Name,
-			func() string {
-				if t.RegionID == nil {
-					return "-"
-				}
-				return strconv.Itoa(*t.RegionID)
-			}(),
+			name,
 		}
 	}
 	return rows

@@ -209,7 +209,7 @@ func newPlanGetCmd() *cobra.Command {
 }
 
 func planHeaders() []string {
-	return []string{"ID", "Name", "CPU", "RAM", "Storage", "Billing", "Recommended"}
+	return []string{"ID", "Name", "CPU", "RAM", "Storage", "Hourly", "Monthly", "Currency"}
 }
 
 func fmtResource(r *api.ResourceValue) string {
@@ -220,9 +220,16 @@ func fmtResource(r *api.ResourceValue) string {
 }
 
 func planToRow(pl api.Plan) []string {
-	rec := "-"
-	if pl.Recommended {
-		rec = printer.BoolCheck(true)
+	hourly, monthly, currency := "-", "-", "-"
+	if len(pl.Prices) > 0 {
+		pr := pl.Prices[0]
+		currency = pr.Code
+		if pr.Hourly != nil {
+			hourly = fmt.Sprintf("%.0f", *pr.Hourly)
+		}
+		if pr.Monthly != nil {
+			monthly = fmt.Sprintf("%.0f", *pr.Monthly)
+		}
 	}
 	return []string{
 		strconv.Itoa(pl.ID),
@@ -230,7 +237,8 @@ func planToRow(pl api.Plan) []string {
 		fmtResource(pl.CPU),
 		fmtResource(pl.RAM),
 		fmtResource(pl.Storage),
-		derefStr(pl.Cycle),
-		rec,
+		hourly,
+		monthly,
+		currency,
 	}
 }

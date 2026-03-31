@@ -231,9 +231,13 @@ func planToRow(pl api.Plan) []string {
 			monthly = pr.Monthly
 		}
 	}
+	name := pl.DisplayName
+	if name == "" {
+		name = pl.Name
+	}
 	return []string{
 		strconv.Itoa(pl.ID),
-		pl.Name,
+		name,
 		fmtResource(pl.CPU),
 		fmtResource(pl.RAM),
 		fmtResource(pl.Storage),

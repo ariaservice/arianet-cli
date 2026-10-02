@@ -9,16 +9,16 @@ import (
 )
 
 const (
-	DefaultAPIURL = "https://api.arianet.ir"
+	DefaultAPIURL = "https://api.ariaservice.net"
 	EnvToken      = "ARIANET_TOKEN"
 	EnvAPIURL     = "ARIANET_API_URL"
 )
 
 // Config holds all CLI configuration.
 type Config struct {
-	Token     string `mapstructure:"token"`
-	APIURL    string `mapstructure:"api_url"`
-	Output    string `mapstructure:"output"`
+	Token  string `mapstructure:"token"`
+	APIURL string `mapstructure:"api_url"`
+	Output string `mapstructure:"output"`
 }
 
 // Dir returns the config directory path (~/.config/arianet).

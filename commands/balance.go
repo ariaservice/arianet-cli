@@ -2,7 +2,9 @@ package commands
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/arianet/arianet-cli/internal/api"
 	"github.com/arianet/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +16,9 @@ func newBalanceCmd() *cobra.Command {
 		Example: `  arianet balance
   arianet balance --output json
   arianet balance transactions
-  arianet balance transactions --page 2`,
+  arianet balance transactions --page 2
+  arianet balance invoices
+  arianet balance invoices get INV-1042`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := requireAuth()
 			if err != nil {
@@ -74,8 +78,7 @@ func newBalanceCmd() *cobra.Command {
 		},
 	}
 
-	txCmd := newTransactionsCmd()
-	cmd.AddCommand(txCmd)
+	cmd.AddCommand(newTransactionsCmd(), newInvoicesCmd())
 	return cmd
 }
 
@@ -150,5 +153,135 @@ func newTransactionsCmd() *cobra.Command {
 
 	cmd.Flags().IntVarP(&page, "page", "p", 1, "page number")
 	cmd.Flags().IntVarP(&limit, "limit", "l", 15, "results per page")
+	return cmd
+}
+
+func invoiceCurrency(inv api.Invoice) string {
+	for _, it := range inv.Items {
+		if it.Currency != nil {
+			return it.Currency.Code
+		}
+	}
+	return ""
+}
+
+func newInvoicesCmd() *cobra.Command {
+	var (
+		page   int
+		limit  int
+		status string
+	)
+
+	cmd := &cobra.Command{
+		Use:     "invoices",
+		Aliases: []string{"invoice"},
+		Short:   "List and view invoices",
+		Example: `  arianet balance invoices
+  arianet balance invoices --status paid
+  arianet balance invoices get INV-1042`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := requireAuth()
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+
+			invoices, pagination, err := client.ListInvoices(page, limit, status)
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+
+			p := printer.New(cfg.Output)
+			if jsonMode() {
+				p.PrintJSON(invoices)
+				return nil
+			}
+
+			if len(invoices) == 0 {
+				printer.Info("No invoices found.")
+				return nil
+			}
+
+			rows := make([][]string, len(invoices))
+			for i, inv := range invoices {
+				rows[i] = []string{
+					inv.Number,
+					inv.Status,
+					inv.PaymentStatus,
+					fmt.Sprintf("%.2f", inv.Total),
+					ptrOrDash(inv.IssuedAt),
+					ptrOrDash(inv.PaidAt),
+				}
+			}
+			p.Table([]string{"Number", "Status", "Payment", "Total", "Issued", "Paid"}, rows)
+
+			if pagination != nil {
+				printer.PaginationFooter(pagination.CurrentPage, pagination.LastPage, int(pagination.Total), "invoices")
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVarP(&page, "page", "p", 1, "page number")
+	cmd.Flags().IntVarP(&limit, "limit", "l", 15, "results per page (max 100)")
+	cmd.Flags().StringVar(&status, "status", "", "filter by invoice status")
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "get <number>",
+		Short: "Show one invoice with its line items",
+		Args:  cobra.ExactArgs(1),
+		Example: `  arianet balance invoices get INV-1042
+  arianet balance invoices get 1042 --output json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := requireAuth()
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+
+			inv, err := client.GetInvoice(strings.TrimSpace(args[0]))
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+
+			p := printer.New(cfg.Output)
+			if jsonMode() {
+				p.PrintJSON(inv)
+				return nil
+			}
+
+			p.Table(
+				[]string{"Field", "Value"},
+				[][]string{
+					{"Number", inv.Number},
+					{"Status", inv.Status},
+					{"Payment", inv.PaymentStatus},
+					{"Subtotal", fmt.Sprintf("%.2f", inv.Subtotal)},
+					{"Discount", fmt.Sprintf("%.2f", inv.Discount)},
+					{"Tax", fmt.Sprintf("%.2f", inv.Tax)},
+					{"Total", fmt.Sprintf("%.2f %s", inv.Total, invoiceCurrency(*inv))},
+					{"Issued", ptrOrDash(inv.IssuedAt)},
+					{"Due", ptrOrDash(inv.DueAt)},
+					{"Paid", ptrOrDash(inv.PaidAt)},
+				},
+			)
+
+			if len(inv.Items) > 0 {
+				fmt.Println()
+				rows := make([][]string, len(inv.Items))
+				for i, it := range inv.Items {
+					code := ""
+					if it.Currency != nil {
+						code = it.Currency.Code
+					}
+					rows[i] = []string{ptrOrDash(it.Description), fmt.Sprintf("%.2f %s", it.Amount, code)}
+				}
+				p.Table([]string{"Item", "Amount"}, rows)
+			}
+			return nil
+		},
+	})
 	return cmd
 }

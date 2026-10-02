@@ -14,10 +14,20 @@ type Response struct {
 type APIError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+
+	// Filled in by the client, not part of the wire format.
+	Status     int `json:"-"`
+	RetryAfter int `json:"-"` // seconds, from the Retry-After header
 }
 
 func (e *APIError) Error() string {
 	return e.Message
+}
+
+// IsNotFound reports whether err is an API 404.
+func IsNotFound(err error) bool {
+	apiErr, ok := err.(*APIError)
+	return ok && (apiErr.Status == 404 || apiErr.Code == "NOT_FOUND")
 }
 
 type Pagination struct {
@@ -52,28 +62,82 @@ type TokensData struct {
 
 // ─── Region / Datacenter ─────────────────────────────────────────────────────
 
+// Region groups datacenters. The Datacenter ID is what every other endpoint
+// calls datacenter_id.
 type Region struct {
+	ID          int          `json:"id"`
+	Name        string       `json:"name"`
+	IsRegion    bool         `json:"is_region"`
+	Status      string       `json:"status"`
+	IsDefault   bool         `json:"is_default"`
+	CountryCode *string      `json:"country_code"`
+	Flag        string       `json:"flag"`
+	Datacenters []Datacenter `json:"datacenters"`
+}
+
+type Datacenter struct {
 	ID          int     `json:"id"`
 	Name        string  `json:"name"`
-	DisplayName *string `json:"display_name"`
-	Country     *string `json:"country"`
+	IsDefault   bool    `json:"is_default"`
+	Status      string  `json:"status"`
+	CountryCode *string `json:"country_code"`
+	Flag        string  `json:"flag"`
 }
 
 type RegionsData struct {
-	Regions []Region `json:"regions"`
+	Items []Region `json:"items"`
+}
+
+// DatacenterEntry is one orderable location, flattened for display.
+type DatacenterEntry struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Region  string `json:"region"`
+	Country string `json:"country"`
+	Status  string `json:"status"`
 }
 
 // ─── OS Template ─────────────────────────────────────────────────────────────
 
+type OSGroup struct {
+	ID        int         `json:"id"`
+	Name      string      `json:"name"`
+	Type      string      `json:"type"`
+	Order     int         `json:"order"`
+	Templates OSTemplates `json:"templates"`
+}
+
+type OSTemplates struct {
+	Data []OSTemplate `json:"data"`
+}
+
 type OSTemplate struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	RegionID    int    `json:"region_id"`
+	ID       int        `json:"id"`
+	Name     string     `json:"name"`
+	Status   bool       `json:"status"`
+	Children OSChildren `json:"children"`
+}
+
+type OSChildren struct {
+	Data []OSChild `json:"data"`
+}
+
+type OSChild struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Status bool   `json:"status"`
 }
 
 type OSData struct {
-	OSTemplates []OSTemplate `json:"os_templates"`
+	Groups []OSGroup `json:"groups"`
+}
+
+// OSEntry is one installable image (a template, or one version of it),
+// flattened for display. ID is the os_id.
+type OSEntry struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Family string `json:"family"`
 }
 
 // ─── Plan ────────────────────────────────────────────────────────────────────
@@ -147,9 +211,17 @@ func (s *Service) PrimaryIP() string {
 }
 
 type ServiceStatus struct {
-	ID             int    `json:"id"`
-	Status         string `json:"status"`
-	InstanceStatus string `json:"instance_status"`
+	ID             int     `json:"id"`
+	Status         string  `json:"status"`
+	InstanceStatus *string `json:"instance_status"`
+}
+
+// ProviderStatus returns the provider-reported status, or "" when unknown.
+func (s *ServiceStatus) ProviderStatus() string {
+	if s.InstanceStatus == nil {
+		return ""
+	}
+	return *s.InstanceStatus
 }
 
 type PlanRef struct {
@@ -170,16 +242,64 @@ type OSRef struct {
 }
 
 type CreateServiceRequest struct {
-	PlanID       int     `json:"plan_id"`
-	DatacenterID int     `json:"datacenter_id"`
-	OsID         int     `json:"os_id"`
-	Hostname     string  `json:"hostname,omitempty"`
-	ProjectID    *int    `json:"project_id,omitempty"`
+	PlanID       int    `json:"plan_id"`
+	DatacenterID int    `json:"datacenter_id"`
+	OsID         int    `json:"os_id"`
+	Hostname     string `json:"hostname,omitempty"`
+	ProjectID    *int   `json:"project_id,omitempty"`
+	CurrencyID   *int   `json:"currency_id,omitempty"`
+	AuthType     string `json:"auth_type,omitempty"` // password (default) | ssh
+	AuthValue    string `json:"auth_value,omitempty"`
+	SSHKeyID     *int   `json:"ssh_key_id,omitempty"`
 }
 
 type CreatedService struct {
-	ID     int    `json:"id"`
-	Status string `json:"status"`
+	ID             int                `json:"id"`
+	Status         string             `json:"status"`
+	InstanceStatus *string            `json:"instance_status"`
+	Name           *string            `json:"name"`
+	IPAddresses    []IPAddressSummary `json:"ip_addresses"`
+	Protected      bool               `json:"protected"`
+	Cycle          *string            `json:"cycle"`
+	Plan           *struct {
+		Name *string `json:"name"`
+	} `json:"plan,omitempty"`
+	Datacenter *struct {
+		ID *int `json:"id"`
+	} `json:"datacenter,omitempty"`
+	OS *struct {
+		Name *string `json:"name"`
+	} `json:"os,omitempty"`
+	RootPassword string `json:"root_password,omitempty"`
+	CreatedAt    string `json:"created_at"`
+}
+
+// CreateResult is a created server plus how the answer was obtained.
+type CreateResult struct {
+	Server   *CreatedService
+	Replayed bool // the answer to an earlier request with the same Idempotency-Key
+}
+
+// ActionResult is the answer to an asynchronous server operation.
+type ActionResult struct {
+	ServerID  int    `json:"server_id"`
+	Message   string `json:"message,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Protected *bool  `json:"protected,omitempty"`
+}
+
+type ServerAction struct {
+	ID         string  `json:"id"`
+	Type       string  `json:"type"`
+	Status     string  `json:"status"`
+	StartedAt  *string `json:"started_at"`
+	FinishedAt *string `json:"finished_at"`
+	CreatedAt  string  `json:"created_at"`
+}
+
+type ServerActions struct {
+	ServerID int            `json:"server_id"`
+	Actions  []ServerAction `json:"actions"`
 }
 
 // ─── Balance ─────────────────────────────────────────────────────────────────
@@ -189,10 +309,10 @@ type BalanceData struct {
 }
 
 type Wallet struct {
-	ID       int      `json:"id"`
-	Balance  float64  `json:"balance"`
-	Primary  bool     `json:"primary"`
-	Status   string   `json:"status"`
+	ID       int       `json:"id"`
+	Balance  float64   `json:"balance"`
+	Primary  bool      `json:"primary"`
+	Status   string    `json:"status"`
 	Currency *Currency `json:"currency,omitempty"`
 }
 
@@ -214,20 +334,44 @@ type Transaction struct {
 	CreatedAt string    `json:"created_at"`
 }
 
+// ─── Invoices ────────────────────────────────────────────────────────────────
+
+// Invoice numbers are text: legacy numeric values and INV-* coexist.
+type Invoice struct {
+	Number        string        `json:"number"`
+	Status        string        `json:"status"`
+	PaymentStatus string        `json:"payment_status"`
+	Subtotal      float64       `json:"subtotal"`
+	Discount      float64       `json:"discount"`
+	Tax           float64       `json:"tax"`
+	Total         float64       `json:"total"`
+	IssuedAt      *string       `json:"issued_at"`
+	DueAt         *string       `json:"due_at"`
+	PaidAt        *string       `json:"paid_at"`
+	Items         []InvoiceItem `json:"items,omitempty"`
+}
+
+type InvoiceItem struct {
+	Amount      float64   `json:"amount"`
+	Currency    *Currency `json:"currency,omitempty"`
+	Description *string   `json:"description"`
+}
+
 // ─── SSH Keys ─────────────────────────────────────────────────────────────────
 
 type SSHKey struct {
-	ID        int     `json:"id"`
-	Name      *string `json:"name"`
-	Key       string  `json:"key"`
-	Protected bool    `json:"protected"`
-	CreatedAt string  `json:"created_at"`
+	ID           int     `json:"id"`
+	Name         *string `json:"name"`
+	Key          string  `json:"key"`
+	Protected    bool    `json:"protected"`
+	DatacenterID *int    `json:"datacenter_id"`
+	CreatedAt    string  `json:"created_at"`
 }
 
 type CreateSSHKeyRequest struct {
-	Name         string  `json:"name"`
-	PublicKey    string  `json:"public_key"`
-	DatacenterID *int    `json:"datacenter_id,omitempty"`
+	Name         string `json:"name"`
+	PublicKey    string `json:"public_key"`
+	DatacenterID int    `json:"datacenter_id"`
 }
 
 type UpdateSSHKeyRequest struct {
@@ -238,23 +382,42 @@ type UpdateSSHKeyRequest struct {
 // ─── Firewalls ────────────────────────────────────────────────────────────────
 
 type Firewall struct {
-	ID        int            `json:"id"`
-	Name      *string        `json:"name"`
-	Protected bool           `json:"protected"`
-	Rules     []FirewallRule `json:"rules"`
-	CreatedAt string         `json:"created_at"`
+	ID           int            `json:"id"`
+	Name         *string        `json:"name"`
+	Protected    bool           `json:"protected"`
+	DatacenterID *int           `json:"datacenter_id"`
+	Rules        []FirewallRule `json:"rules"`
+	CreatedAt    string         `json:"created_at"`
 }
 
 type FirewallRule struct {
-	Direction string `json:"direction"`
-	Protocol  string `json:"protocol"`
-	PortRange string `json:"port_range,omitempty"`
-	Source    string `json:"source,omitempty"`
-	Action    string `json:"action"`
+	ID          string  `json:"id,omitempty"`
+	Direction   string  `json:"direction"` // ingress | egress
+	Protocol    string  `json:"protocol"`  // tcp | udp | icmp | esp | gre
+	PortRange   *string `json:"port_range,omitempty"`
+	RemoteIP    *string `json:"remote_ip,omitempty"`
+	Description *string `json:"description,omitempty"`
 }
 
 type CreateFirewallRequest struct {
-	Name         string         `json:"name"`
-	DatacenterID *int           `json:"datacenter_id,omitempty"`
-	Rules        []FirewallRule `json:"rules,omitempty"`
+	Name         string `json:"name"`
+	DatacenterID int    `json:"datacenter_id"`
+	Description  string `json:"description,omitempty"`
+}
+
+type UpdateFirewallRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
+type AddFirewallRuleRequest struct {
+	Direction   string `json:"direction"`
+	Protocol    string `json:"protocol"`
+	PortRange   string `json:"port_range,omitempty"`
+	RemoteIP    string `json:"remote_ip,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type MessageData struct {
+	Message string `json:"message"`
 }

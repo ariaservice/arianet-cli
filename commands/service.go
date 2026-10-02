@@ -27,6 +27,7 @@ func newServerCmd() *cobra.Command {
 		newServiceCreateCmd(),
 		newServiceDeleteCmd(),
 		newServiceStatusCmd(),
+		newServiceActionsCmd(),
 		newServiceRestartCmd(),
 		newServicePowerOnCmd(),
 		newServicePowerOffCmd(),
@@ -35,6 +36,45 @@ func newServerCmd() *cobra.Command {
 		newServiceProtectCmd(),
 	)
 	return cmd
+}
+
+func jsonMode() bool { return cfg != nil && cfg.Output == printer.FormatJSON }
+
+func parseServerID(arg string) (int, error) {
+	id, err := strconv.Atoi(arg)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid server ID: %s", arg)
+	}
+	return id, nil
+}
+
+// reportAction prints the answer to an accepted operation.
+func reportAction(res *api.ActionResult, fallback string) {
+	if jsonMode() {
+		printer.New(cfg.Output).PrintJSON(res)
+		return
+	}
+	msg := res.Message
+	if msg == "" {
+		msg = fallback
+	}
+	printer.Success(msg)
+}
+
+// addWaitFlags registers --wait and --timeout on an operation command.
+func addWaitFlags(cmd *cobra.Command, wait *bool, timeout *time.Duration) {
+	cmd.Flags().BoolVar(wait, "wait", false, "wait until the operation has finished")
+	cmd.Flags().DurationVar(timeout, "timeout", defaultWaitTimeout, "longest time to wait with --wait")
+}
+
+func maybeWait(client *api.Client, id int, spec waitSpec, wait bool, timeout time.Duration) {
+	if !wait {
+		if !jsonMode() {
+			printer.Info(fmt.Sprintf("Track progress: arianet server status %d   (or add --wait)", id))
+		}
+		return
+	}
+	finishWait(id, spec, waitForServer(client, id, spec, timeout), timeout)
 }
 
 func newServiceListCmd() *cobra.Command {
@@ -47,9 +87,14 @@ func newServiceListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List your cloud servers",
+		Long: `List your cloud servers.
+
+Without --status, active and suspended servers are shown. Other statuses
+include creating, pending, failed, terminated, powering_on, powering_off,
+restarting and reinstalling_os.`,
 		Example: `  arianet server list
   arianet server list --status active
-  arianet server list --status suspended
+  arianet server list --status terminated
   arianet server list --page 2 --limit 20
   arianet server list --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -59,35 +104,14 @@ func newServiceListCmd() *cobra.Command {
 				return nil
 			}
 
-			// Get all servers from API (no status filter on API side)
-			services, pagination, err := client.ListServices(page, limit, "")
+			services, pagination, err := client.ListServices(page, limit, status)
 			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			// Client-side filtering: default shows only active and suspended
-			if status == "" {
-				filtered := make([]api.Service, 0)
-				for _, s := range services {
-					if s.Status == "active" || s.Status == "suspended" {
-						filtered = append(filtered, s)
-					}
-				}
-				services = filtered
-			} else if status != "" {
-				// Filter to specific status if provided
-				filtered := make([]api.Service, 0)
-				for _, s := range services {
-					if s.Status == status {
-						filtered = append(filtered, s)
-					}
-				}
-				services = filtered
-			}
-
 			p := printer.New(cfg.Output)
-			if cfg.Output == printer.FormatJSON {
+			if jsonMode() {
 				p.PrintJSON(services)
 				return nil
 			}
@@ -96,7 +120,7 @@ func newServiceListCmd() *cobra.Command {
 				if status == "" {
 					printer.EmptyState(
 						"No active or suspended servers found",
-						"Use --status to view all servers or create a new one with: arianet server create",
+						"Use --status to view other servers or create one with: arianet server create",
 					)
 				} else {
 					printer.EmptyState(
@@ -119,7 +143,7 @@ func newServiceListCmd() *cobra.Command {
 					hostname = printer.Dim(fmt.Sprintf("(ID: %d)", s.ID))
 				}
 
-				providerStatus := derefStr(s.InstanceStatus)
+				providerStatus := strings.ToLower(derefStr(s.InstanceStatus))
 				if providerStatus == "" {
 					providerStatus = printer.Dim("-")
 				}
@@ -129,15 +153,13 @@ func newServiceListCmd() *cobra.Command {
 					protected = printer.BoolCheck(true)
 				}
 
-				planName := ""
+				planName, dcName, osName := "", "", ""
 				if s.Plan != nil {
 					planName = s.Plan.Name
 				}
-				dcName := ""
 				if s.Datacenter != nil {
 					dcName = s.Datacenter.Name
 				}
-				osName := ""
 				if s.OS != nil {
 					osName = s.OS.Name
 				}
@@ -162,12 +184,7 @@ func newServiceListCmd() *cobra.Command {
 			)
 
 			if pagination != nil && pagination.LastPage > 1 {
-				printer.PaginationFooter(
-					pagination.CurrentPage,
-					pagination.LastPage,
-					int(pagination.Total),
-					"servers",
-				)
+				printer.PaginationFooter(pagination.CurrentPage, pagination.LastPage, int(pagination.Total), "servers")
 			}
 			return nil
 		},
@@ -175,7 +192,7 @@ func newServiceListCmd() *cobra.Command {
 
 	cmd.Flags().IntVarP(&page, "page", "p", 1, "page number")
 	cmd.Flags().IntVarP(&limit, "limit", "l", 15, "results per page (max 100)")
-	cmd.Flags().StringVarP(&status, "status", "s", "", "filter by status (active, suspended) - default: active,suspended")
+	cmd.Flags().StringVarP(&status, "status", "s", "", "filter by status (default: active and suspended)")
 	return cmd
 }
 
@@ -187,9 +204,9 @@ func newServiceGetCmd() *cobra.Command {
 		Example: `  arianet server get 42
   arianet server get 42 --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid service ID: %s", args[0])
+				return err
 			}
 
 			client, err := requireAuth()
@@ -205,25 +222,23 @@ func newServiceGetCmd() *cobra.Command {
 			}
 
 			p := printer.New(cfg.Output)
-			if cfg.Output == printer.FormatJSON {
+			if jsonMode() {
 				p.PrintJSON(s)
 				return nil
 			}
 
 			ip := s.PrimaryIP()
 			if ip == "" {
-				ip = printer.Dim("—")
+				ip = printer.Dim("-")
 			}
 
-			planStr := "-"
+			planStr, dcStr, osStr := "-", "-", "-"
 			if s.Plan != nil {
 				planStr = fmt.Sprintf("%s (ID: %d)", s.Plan.Name, s.Plan.ID)
 			}
-			dcStr := "-"
 			if s.Datacenter != nil {
 				dcStr = fmt.Sprintf("%s (ID: %d)", s.Datacenter.Name, s.Datacenter.ID)
 			}
-			osStr := "-"
 			if s.OS != nil {
 				osStr = fmt.Sprintf("%s (ID: %d)", s.OS.Name, s.OS.ID)
 			}
@@ -232,10 +247,11 @@ func newServiceGetCmd() *cobra.Command {
 				[]string{"Field", "Value"},
 				[][]string{
 					{"ID", strconv.Itoa(s.ID)},
-					{"Hostname", derefStr(s.Hostname)},
+					{"Hostname", ptrOrDash(s.Hostname)},
 					{"Status", printer.StatusColor(s.Status)},
+					{"Provider Status", strings.ToLower(ptrOrDash(s.InstanceStatus))},
 					{"Protected", printer.BoolCheck(derefBool(s.Protected))},
-					{"Billing Cycle", derefStr(s.Cycle)},
+					{"Billing Cycle", ptrOrDash(s.Cycle)},
 					{"IP Address", ip},
 					{"Plan", planStr},
 					{"Region", dcStr},
@@ -250,12 +266,17 @@ func newServiceGetCmd() *cobra.Command {
 
 func newServiceCreateCmd() *cobra.Command {
 	var (
-		planID       int
-		datacenterID int
-		osID         int
-		hostname     string
-		yes          bool
-		noWatch      bool
+		planID         int
+		datacenterID   int
+		osID           int
+		hostname       string
+		sshKeyID       int
+		password       string
+		currencyID     int
+		idempotencyKey string
+		yes            bool
+		noWait         bool
+		timeout        time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -263,37 +284,55 @@ func newServiceCreateCmd() *cobra.Command {
 		Short: "Create a new cloud server",
 		Long: `Create a new cloud server.
 
-If required flags are omitted, an interactive wizard will guide you through
-selecting a region, plan, OS template, and hostname.`,
-		Example: `  arianet server create                                          # interactive wizard
+If --plan, --region or --os is omitted, an interactive wizard guides you
+through the choice.
+
+Authentication: pass --ssh-key <id> to log in with a stored SSH key, or
+--password to set the root password yourself. With neither, a strong random
+root password is generated and printed once - save it.
+
+The command waits until the server is active (up to --timeout). Use
+--no-wait to return as soon as the order is accepted.
+
+Every order carries an idempotency key, so a retry after a network failure can
+never buy a second server. If the command is interrupted before it can tell
+you the outcome, re-run it with the same --idempotency-key it printed.`,
+		Example: `  arianet server create                                   # interactive wizard
   arianet server create --plan 5 --region 1 --os 3 --hostname web-01
   arianet server create --plan 5 --region 1 --os 3 --hostname web-01 --ssh-key 2
-  arianet server create --plan 5 --region 1 --os 3 --hostname web-01 --no-watch`,
+  arianet server create --plan 5 --region 1 --os 3 --no-wait --yes --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if sshKeyID > 0 && password != "" {
+				return fmt.Errorf("use either --ssh-key or --password, not both")
+			}
+			if idempotencyKey != "" && !validIdempotencyKey(idempotencyKey) {
+				return fmt.Errorf("--idempotency-key must be 8-128 characters of letters, digits and _-:.")
+			}
+
 			client, err := requireAuth()
 			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			// Interactive wizard when required flags are missing
-			if planID == 0 || datacenterID == 0 || osID == 0 || hostname == "" {
-				datacenterID, planID, osID, hostname, err = runServerCreateWizard(
-					client, datacenterID, planID, osID, hostname,
-				)
+			if planID == 0 || datacenterID == 0 || osID == 0 {
+				if jsonMode() {
+					return fmt.Errorf("--plan, --region and --os are required with --output json")
+				}
+				choice, err := runServerCreateWizard(client, datacenterID, planID, osID, hostname, sshKeyID, password != "")
 				if err != nil {
 					printer.Error(err.Error())
-					return nil
+					os.Exit(1)
 				}
+				datacenterID, planID, osID, hostname, sshKeyID = choice.datacenterID, choice.planID, choice.osID, choice.hostname, choice.sshKeyID
 			}
 
-			// Confirm
-			if !yes {
-				fmt.Printf("\nCreate server %q with plan #%d in region #%d? [y/N]: ", hostname, planID, datacenterID)
-				reader := bufio.NewReader(os.Stdin)
-				answer, _ := reader.ReadString('\n')
-				answer = strings.TrimSpace(strings.ToLower(answer))
-				if answer != "y" && answer != "yes" {
+			if !yes && !jsonMode() {
+				name := hostname
+				if name == "" {
+					name = "(no hostname)"
+				}
+				if !confirm(fmt.Sprintf("\nCreate server %s with plan #%d in region #%d? Billing starts immediately", name, planID, datacenterID)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -304,71 +343,176 @@ selecting a region, plan, OS template, and hostname.`,
 				DatacenterID: datacenterID,
 				OsID:         osID,
 				Hostname:     hostname,
+				CurrencyID:   optIntPtr(currencyID),
 			}
 
-			created, err := client.CreateService(req)
+			generated := ""
+			if sshKeyID > 0 {
+				req.AuthType = "ssh"
+				req.SSHKeyID = &sshKeyID
+			} else {
+				req.AuthType = "password"
+				if password == "" {
+					password, err = generatePassword(20)
+					if err != nil {
+						return fmt.Errorf("could not generate a password: %w", err)
+					}
+					generated = password
+				}
+				req.AuthValue = password
+			}
+
+			if idempotencyKey == "" {
+				idempotencyKey = newIdempotencyKey()
+			}
+
+			result, err := client.CreateService(req, idempotencyKey)
 			if err != nil {
+				if outcomeUnknown(err) {
+					fmt.Fprintf(os.Stderr, "\nThe outcome of the order is unknown. Re-run the same command with\n  --idempotency-key %s\nto find out safely: it returns the server if it was created, and never creates a second one.\n", idempotencyKey)
+				}
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Server %q created (ID: %d)", hostname, created.ID))
+			created := result.Server
+			if created.RootPassword == "" && generated != "" {
+				created.RootPassword = generated
+			}
 
-			if !noWatch {
-				watchServerProvisioning(client, created.ID)
+			if jsonMode() {
+				printer.New(cfg.Output).PrintJSON(created)
 			} else {
-				printer.Info(fmt.Sprintf("Track progress: arianet server status %d", created.ID))
+				printCreated(created, result.Replayed, req.AuthType == "password" && generated != "")
+			}
+
+			if noWait {
+				if !jsonMode() {
+					printer.Info(fmt.Sprintf("Track progress: arianet server status %d", created.ID))
+				}
+				return nil
+			}
+			finishWait(created.ID, waitProvisioned(), waitForServer(client, created.ID, waitProvisioned(), timeout), timeout)
+			if !jsonMode() {
+				printer.Info(fmt.Sprintf("Details: arianet server get %d", created.ID))
 			}
 			return nil
 		},
 	}
 
 	cmd.Flags().IntVar(&planID, "plan", 0, "plan ID (see: arianet plan list)")
-	cmd.Flags().IntVar(&datacenterID, "region", 0, "datacenter/region ID (see: arianet region list)")
+	cmd.Flags().IntVar(&datacenterID, "region", 0, "region ID (see: arianet region list)")
 	cmd.Flags().IntVar(&osID, "os", 0, "OS template ID (see: arianet os list)")
 	cmd.Flags().StringVar(&hostname, "hostname", "", "hostname for the server")
+	cmd.Flags().IntVar(&sshKeyID, "ssh-key", 0, "log in with this SSH key ID instead of a password (see: arianet ssh list)")
+	cmd.Flags().StringVar(&password, "password", "", "root password (default: a random one is generated and shown once)")
+	cmd.Flags().IntVar(&currencyID, "currency", 0, "currency ID to pay with (default: your default wallet)")
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "reuse a key to retry an order safely")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
-	cmd.Flags().BoolVar(&noWatch, "no-watch", false, "skip status monitoring after creation")
+	cmd.Flags().BoolVar(&noWait, "no-wait", false, "return as soon as the order is accepted")
+	cmd.Flags().BoolVar(&noWait, "no-watch", false, "alias of --no-wait")
+	_ = cmd.Flags().MarkHidden("no-watch")
+	cmd.Flags().DurationVar(&timeout, "timeout", defaultWaitTimeout, "longest time to wait for the server to become active")
 
 	return cmd
 }
 
-// runServerCreateWizard interactively collects missing creation parameters.
-func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, hostname string) (int, int, int, string, error) {
+func validIdempotencyKey(k string) bool {
+	if len(k) < 8 || len(k) > 128 {
+		return false
+	}
+	for _, r := range k {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("_-:.", r):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// outcomeUnknown reports whether an order may or may not have been placed.
+func outcomeUnknown(err error) bool {
+	apiErr, ok := err.(*api.APIError)
+	if !ok {
+		return true
+	}
+	return apiErr.Status >= 500 || apiErr.Status == 409
+}
+
+func printCreated(s *api.CreatedService, replayed, showPassword bool) {
+	if replayed {
+		printer.Info("This is the result of an earlier order with the same idempotency key; no second server was created.")
+	}
+	name := derefStr(s.Name)
+	if name == "" {
+		name = fmt.Sprintf("#%d", s.ID)
+	}
+	printer.Success(fmt.Sprintf("Server %s ordered (ID: %d, status: %s)", name, s.ID, s.Status))
+
+	rows := [][]string{{"ID", strconv.Itoa(s.ID)}, {"Status", s.Status}}
+	if s.Plan != nil && s.Plan.Name != nil {
+		rows = append(rows, []string{"Plan", *s.Plan.Name})
+	}
+	if s.OS != nil && s.OS.Name != nil {
+		rows = append(rows, []string{"OS", *s.OS.Name})
+	}
+	for _, ip := range s.IPAddresses {
+		rows = append(rows, []string{"IP (" + ip.Type + ")", ip.IP})
+	}
+	printer.New(cfg.Output).Table([]string{"Field", "Value"}, rows)
+
+	if s.RootPassword != "" && showPassword {
+		fmt.Printf("\n  Root password: %s\n", s.RootPassword)
+		printer.Warn("Save this password now. It is not shown again.")
+	}
+}
+
+type createChoice struct {
+	datacenterID, planID, osID int
+	hostname                   string
+	sshKeyID                   int
+}
+
+var errNoInput = fmt.Errorf("no input available; pass --plan, --region and --os instead of using the wizard")
+
+// runServerCreateWizard interactively collects the missing order parameters.
+func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, hostname string, sshKeyID int, passwordSet bool) (createChoice, error) {
 	reader := bufio.NewReader(os.Stdin)
+	c := createChoice{datacenterID: datacenterID, planID: planID, osID: osID, hostname: hostname, sshKeyID: sshKeyID}
 
 	fmt.Println()
 	fmt.Println("  Arianet Server Creation Wizard")
 	fmt.Println("  " + strings.Repeat("-", 38))
 
-	// Step 1: Region
-	if datacenterID == 0 {
-		regions, err := client.ListRegions()
+	if c.datacenterID == 0 {
+		list, err := client.ListDatacenters()
 		if err != nil {
-			return 0, 0, 0, "", fmt.Errorf("could not fetch regions: %w", err)
+			return c, fmt.Errorf("could not fetch regions: %w", err)
 		}
-		active := regions
-		if len(active) == 0 {
-			return 0, 0, 0, "", fmt.Errorf("no active regions available")
+		if len(list) == 0 {
+			return c, fmt.Errorf("no regions available")
 		}
 
-		fmt.Println("\n  Step 1 of 4 — Select a Region")
+		fmt.Println("\n  Step 1 - Select a region")
 		fmt.Println()
-		for i, r := range active {
-			fmt.Printf("    %2d)  %s  (ID: %d)\n", i+1, wizardPad(derefStr(r.DisplayName), 28), r.ID)
+		for i, d := range list {
+			fmt.Printf("    %2d)  %s  %s (ID: %d)\n", i+1, wizardPad(d.Name, 28), d.Country, d.ID)
 		}
-		choice := wizardPromptInt(reader, "\n  Enter number", 1, len(active))
-		datacenterID = active[choice-1].ID
-		fmt.Printf("  -> Region: %s\n", derefStr(active[choice-1].DisplayName))
+		n, err := wizardPromptInt(reader, "\n  Enter number", 1, len(list))
+		if err != nil {
+			return c, err
+		}
+		c.datacenterID = list[n-1].ID
+		fmt.Printf("  -> Region: %s\n", list[n-1].Name)
 	}
 
-	// Step 2: Plan
-	if planID == 0 {
-		allPlans, err := client.ListPlansByDatacenter(datacenterID)
+	if c.planID == 0 {
+		allPlans, err := client.ListPlansByDatacenter(c.datacenterID)
 		if err != nil {
-			return 0, 0, 0, "", fmt.Errorf("could not fetch plans: %w", err)
+			return c, fmt.Errorf("could not fetch plans: %w", err)
 		}
-		// Filter out plans with no name
 		plans := make([]api.Plan, 0, len(allPlans))
 		for _, p := range allPlans {
 			if strings.TrimSpace(p.Name) != "" {
@@ -376,15 +520,15 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 			}
 		}
 		if len(plans) == 0 {
-			return 0, 0, 0, "", fmt.Errorf("no plans available for this region")
+			return c, fmt.Errorf("no plans available for this region")
 		}
 
-		fmt.Println("\n  Step 2 of 4 — Select a Plan")
+		fmt.Println("\n  Step 2 - Select a plan")
 		fmt.Println()
 		for i, p := range plans {
 			price := ""
 			if len(p.Prices) > 0 && p.Prices[0].Monthly != "" {
-				price = fmt.Sprintf("  %s/mo", p.Prices[0].Monthly)
+				price = fmt.Sprintf("  %s %s/mo", p.Prices[0].Monthly, p.Prices[0].Code)
 			}
 			rec := ""
 			if p.Recommended {
@@ -392,49 +536,79 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 			}
 			fmt.Printf("    %2d)  %s (ID: %d)%s%s\n", i+1, wizardPad(p.Name, 28), p.ID, price, rec)
 		}
-		choice := wizardPromptInt(reader, "\n  Enter number", 1, len(plans))
-		planID = plans[choice-1].ID
-		fmt.Printf("  -> Plan: %s\n", plans[choice-1].Name)
-	}
-
-	// Step 3: OS
-	if osID == 0 {
-		templates, err := client.ListOSByDatacenter(datacenterID)
+		n, err := wizardPromptInt(reader, "\n  Enter number", 1, len(plans))
 		if err != nil {
-			return 0, 0, 0, "", fmt.Errorf("could not fetch OS templates: %w", err)
+			return c, err
 		}
-		active := templates
-		if len(active) == 0 {
-			return 0, 0, 0, "", fmt.Errorf("no OS templates available")
-		}
-
-		fmt.Println("\n  Step 3 of 4 — Select an OS Template")
-		fmt.Println()
-		for i, t := range active {
-			fmt.Printf("    %2d)  %s  (ID: %d)\n", i+1, wizardPad(t.Name, 28), t.ID)
-		}
-		choice := wizardPromptInt(reader, "\n  Enter number", 1, len(active))
-		osID = active[choice-1].ID
-		fmt.Printf("  -> OS: %s\n", active[choice-1].Name)
+		c.planID = plans[n-1].ID
+		fmt.Printf("  -> Plan: %s\n", plans[n-1].Name)
 	}
 
-	// Step 4: Hostname
-	if hostname == "" {
-		fmt.Println("\n  Step 4 of 4 — Hostname")
-		for {
-			fmt.Print("\n  Enter hostname: ")
-			line, _ := reader.ReadString('\n')
-			hostname = strings.TrimSpace(line)
-			if hostname != "" {
-				break
-			}
-			fmt.Println("  Hostname cannot be empty.")
+	if c.osID == 0 {
+		images, err := client.ListOSByDatacenter(c.datacenterID)
+		if err != nil {
+			return c, fmt.Errorf("could not fetch OS templates: %w", err)
 		}
-		fmt.Printf("  -> Hostname: %s\n", hostname)
+		if len(images) == 0 {
+			return c, fmt.Errorf("no OS templates available for this region")
+		}
+
+		fmt.Println("\n  Step 3 - Select an operating system")
+		fmt.Println()
+		for i, t := range images {
+			fmt.Printf("    %2d)  %s  (ID: %d)\n", i+1, wizardPad(t.Name, 34), t.ID)
+		}
+		n, err := wizardPromptInt(reader, "\n  Enter number", 1, len(images))
+		if err != nil {
+			return c, err
+		}
+		c.osID = images[n-1].ID
+		fmt.Printf("  -> OS: %s\n", images[n-1].Name)
+	}
+
+	if c.hostname == "" {
+		fmt.Println("\n  Step 4 - Hostname (leave empty for an automatic name)")
+		fmt.Print("\n  Enter hostname: ")
+		line, err := reader.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			return c, errNoInput
+		}
+		c.hostname = strings.TrimSpace(line)
+		if c.hostname != "" {
+			fmt.Printf("  -> Hostname: %s\n", c.hostname)
+		}
+	}
+
+	if c.sshKeyID == 0 && !passwordSet {
+		keys, _, err := client.ListSSHKeys(1, 100)
+		if err == nil {
+			var usable []api.SSHKey
+			for _, k := range keys {
+				if k.DatacenterID != nil && *k.DatacenterID == c.datacenterID {
+					usable = append(usable, k)
+				}
+			}
+			if len(usable) > 0 {
+				fmt.Println("\n  Step 5 - Login method")
+				fmt.Println()
+				fmt.Printf("    %2d)  Generated root password\n", 1)
+				for i, k := range usable {
+					fmt.Printf("    %2d)  SSH key %s (ID: %d)\n", i+2, derefStr(k.Name), k.ID)
+				}
+				n, err := wizardPromptInt(reader, "\n  Enter number", 1, len(usable)+1)
+				if err != nil {
+					return c, err
+				}
+				if n > 1 {
+					c.sshKeyID = usable[n-2].ID
+					fmt.Printf("  -> SSH key: %s\n", derefStr(usable[n-2].Name))
+				}
+			}
+		}
 	}
 
 	fmt.Println()
-	return datacenterID, planID, osID, hostname, nil
+	return c, nil
 }
 
 // wizardPad pads s to width visible columns, correctly handling Unicode (Persian, Arabic, etc.).
@@ -447,134 +621,43 @@ func wizardPad(s string, width int) string {
 }
 
 // wizardPromptInt reads a number in [min, max] from the user.
-func wizardPromptInt(reader *bufio.Reader, label string, min, max int) int {
+func wizardPromptInt(reader *bufio.Reader, label string, min, max int) (int, error) {
 	for {
 		fmt.Printf("%s [%d-%d]: ", label, min, max)
-		line, _ := reader.ReadString('\n')
-		n, err := strconv.Atoi(strings.TrimSpace(line))
-		if err == nil && n >= min && n <= max {
-			return n
+		line, err := reader.ReadString('\n')
+		input := strings.TrimSpace(line)
+		if err != nil && input == "" {
+			return 0, errNoInput
+		}
+		n, convErr := strconv.Atoi(input)
+		if convErr == nil && n >= min && n <= max {
+			return n, nil
 		}
 		fmt.Printf("  Invalid choice. Please enter a number between %d and %d.\n", min, max)
 	}
 }
 
-// watchServerProvisioning polls server status every 30s and prints a progress bar.
-func watchServerProvisioning(client *api.Client, serverID int) {
-	const interval = 30 * time.Second
-	const timeout = 15 * time.Minute
-	const barWidth = 30
-
-	terminalStates := map[string]bool{
-		"active":    true,
-		"failed":    true,
-		"suspended": true,
-	}
-
-	// Progress weight per status (0–barWidth)
-	statusProgress := map[string]int{
-		"request_creating":  4,
-		"creating":          10,
-		"pending":           18,
-		"request_activate":  22,
-		"request_unsuspend": 24,
-		"active":            barWidth,
-		"failed":            barWidth,
-	}
-
-	fmt.Println()
-	fmt.Println("  Monitoring provisioning (checking every 30s, Ctrl+C to stop)")
-	fmt.Println("  " + strings.Repeat("-", 52))
-	fmt.Printf("  %-8s  %-34s  %s\n", "Elapsed", "Progress", "Status")
-	fmt.Println("  " + strings.Repeat("-", 52))
-
-	start := time.Now()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	printRow := func(elapsed time.Duration, status string, isErr bool) {
-		filled := statusProgress[status]
-		if filled == 0 && !isErr {
-			// Unknown status — animate based on elapsed time
-			sec := int(elapsed.Seconds())
-			filled = (sec * barWidth) / int(timeout.Seconds())
-			if filled >= barWidth {
-				filled = barWidth - 1
-			}
-		}
-		bar := "[" + strings.Repeat("#", filled) + strings.Repeat("-", barWidth-filled) + "]"
-		elapsedStr := fmt.Sprintf("%ds", int(elapsed.Seconds()))
-		fmt.Printf("  %-8s  %s  %s\n", elapsedStr, bar, status)
-	}
-
-	// First poll immediately (no need to wait 30s)
-	check := func() (done bool) {
-		elapsed := time.Since(start)
-		st, err := client.GetServiceStatus(serverID)
-		if err != nil {
-			printRow(elapsed, "error: "+err.Error(), true)
-			return false
-		}
-		printRow(elapsed, st.Status, false)
-		return terminalStates[st.Status]
-	}
-
-	if check() {
-		printFinalProvisionResult(client, serverID)
-		return
-	}
-
-	deadline := time.After(timeout)
-	for {
-		select {
-		case <-ticker.C:
-			if check() {
-				printFinalProvisionResult(client, serverID)
-				return
-			}
-		case <-deadline:
-			fmt.Println()
-			printer.Info(fmt.Sprintf("Timed out after %s. Check manually: arianet server status %d",
-				timeout, serverID))
-			return
-		}
-	}
-}
-
-func printFinalProvisionResult(client *api.Client, serverID int) {
-	st, err := client.GetServiceStatus(serverID)
-	fmt.Println("  " + strings.Repeat("-", 52))
-	fmt.Println()
-	if err != nil || st.Status != "active" {
-		status := "unknown"
-		if err == nil {
-			status = st.Status
-		}
-		printer.Error(fmt.Sprintf("Server #%d ended with status: %s", serverID, status))
-		printer.Info(fmt.Sprintf("Details: arianet server get %d", serverID))
-	} else {
-		printer.Success(fmt.Sprintf("Server #%d is online.", serverID))
-		printer.Info(fmt.Sprintf("Details: arianet server get %d", serverID))
-	}
-}
-
 func newServiceDeleteCmd() *cobra.Command {
-	var yes bool
+	var (
+		yes     bool
+		wait    bool
+		timeout time.Duration
+	)
 
 	cmd := &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a server",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet server delete 42
-  arianet server delete 42 --yes`,
+  arianet server delete 42 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid service ID: %s", args[0])
+				return err
 			}
 
 			if !yes {
-				if !confirm(fmt.Sprintf("Delete service #%d? This action cannot be undone", id)) {
+				if !confirm(fmt.Sprintf("Delete server #%d? This cannot be undone", id)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -586,17 +669,20 @@ func newServiceDeleteCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := client.DeleteService(id); err != nil {
+			res, err := client.DeleteService(id)
+			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Service #%d deleted.", id))
+			reportAction(res, fmt.Sprintf("Server #%d deletion started.", id))
+			maybeWait(client, id, waitDeleted(), wait, timeout)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
+	addWaitFlags(cmd, &wait, &timeout)
 	return cmd
 }
 
@@ -608,9 +694,9 @@ func newServiceStatusCmd() *cobra.Command {
 		Example: `  arianet server status 42
   arianet server status 42 --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid service ID: %s", args[0])
+				return err
 			}
 
 			client, err := requireAuth()
@@ -626,7 +712,7 @@ func newServiceStatusCmd() *cobra.Command {
 			}
 
 			p := printer.New(cfg.Output)
-			if cfg.Output == printer.FormatJSON {
+			if jsonMode() {
 				p.PrintJSON(status)
 				return nil
 			}
@@ -635,7 +721,7 @@ func newServiceStatusCmd() *cobra.Command {
 				[]string{"Field", "Value"},
 				[][]string{
 					{"Status", printer.StatusColor(status.Status)},
-					{"Instance Status", status.InstanceStatus},
+					{"Provider Status", strings.ToLower(ptrOrDash(status.InstanceStatus))},
 				},
 			)
 			return nil
@@ -643,23 +729,80 @@ func newServiceStatusCmd() *cobra.Command {
 	}
 }
 
+func newServiceActionsCmd() *cobra.Command {
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "actions <id>",
+		Short: "Show the operation history of a server",
+		Long: `Show the operations performed on a server (create, restart, reinstall, ...),
+newest first, with their outcome.`,
+		Args: cobra.ExactArgs(1),
+		Example: `  arianet server actions 42
+  arianet server actions 42 --limit 50 --output json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseServerID(args[0])
+			if err != nil {
+				return err
+			}
+
+			client, err := requireAuth()
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+
+			history, err := client.ListServiceActions(id, limit)
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+
+			p := printer.New(cfg.Output)
+			if jsonMode() {
+				p.PrintJSON(history)
+				return nil
+			}
+
+			if len(history.Actions) == 0 {
+				printer.Info("No operations recorded for this server.")
+				return nil
+			}
+
+			rows := make([][]string, len(history.Actions))
+			for i, a := range history.Actions {
+				rows[i] = []string{a.Type, a.Status, ptrOrDash(a.StartedAt), ptrOrDash(a.FinishedAt), a.ID}
+			}
+			p.Table([]string{"Operation", "Status", "Started", "Finished", "ID"}, rows)
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "l", 20, "number of operations to show")
+	return cmd
+}
+
 func newServiceRestartCmd() *cobra.Command {
-	var yes bool
+	var (
+		yes     bool
+		wait    bool
+		timeout time.Duration
+	)
 
 	cmd := &cobra.Command{
 		Use:   "restart <id>",
 		Short: "Restart a server",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet server restart 42
-  arianet server restart 42 --yes`,
+  arianet server restart 42 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid service ID: %s", args[0])
+				return err
 			}
 
 			if !yes {
-				if !confirm(fmt.Sprintf("Restart service #%d?", id)) {
+				if !confirm(fmt.Sprintf("Restart server #%d?", id)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -671,29 +814,38 @@ func newServiceRestartCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := client.RestartService(id); err != nil {
+			res, err := client.RestartService(id)
+			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Service #%d is restarting.", id))
+			reportAction(res, fmt.Sprintf("Server #%d is restarting.", id))
+			maybeWait(client, id, waitRestarted(), wait, timeout)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
+	addWaitFlags(cmd, &wait, &timeout)
 	return cmd
 }
 
 func newServicePowerOnCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "power-on <id>",
-		Short: "Power on a server",
-		Args:  cobra.ExactArgs(1),
+	var (
+		wait    bool
+		timeout time.Duration
+	)
+
+	cmd := &cobra.Command{
+		Use:     "power-on <id>",
+		Short:   "Power on a server",
+		Args:    cobra.ExactArgs(1),
+		Example: `  arianet server power-on 42 --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid server ID: %s", args[0])
+				return err
 			}
 
 			client, err := requireAuth()
@@ -702,28 +854,38 @@ func newServicePowerOnCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := client.PowerOnService(id); err != nil {
+			res, err := client.PowerOnService(id)
+			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Server #%d powering on.", id))
+			reportAction(res, fmt.Sprintf("Server #%d is powering on.", id))
+			maybeWait(client, id, waitPoweredOn(), wait, timeout)
 			return nil
 		},
 	}
+
+	addWaitFlags(cmd, &wait, &timeout)
+	return cmd
 }
 
 func newServicePowerOffCmd() *cobra.Command {
-	var yes bool
+	var (
+		yes     bool
+		wait    bool
+		timeout time.Duration
+	)
 
 	cmd := &cobra.Command{
-		Use:   "power-off <id>",
-		Short: "Power off a server",
-		Args:  cobra.ExactArgs(1),
+		Use:     "power-off <id>",
+		Short:   "Power off a server",
+		Args:    cobra.ExactArgs(1),
+		Example: `  arianet server power-off 42 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid server ID: %s", args[0])
+				return err
 			}
 
 			if !yes {
@@ -739,17 +901,20 @@ func newServicePowerOffCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := client.PowerOffService(id); err != nil {
+			res, err := client.PowerOffService(id)
+			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Server #%d powering off.", id))
+			reportAction(res, fmt.Sprintf("Server #%d is powering off.", id))
+			maybeWait(client, id, waitPoweredOff(), wait, timeout)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
+	addWaitFlags(cmd, &wait, &timeout)
 	return cmd
 }
 
@@ -762,9 +927,12 @@ func newServiceRenameCmd() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		Example: `  arianet server rename 42 --name new-hostname`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid service ID: %s", args[0])
+				return err
+			}
+			if n := len([]rune(name)); n < 1 || n > 30 {
+				return fmt.Errorf("--name must be 1-30 characters")
 			}
 
 			client, err := requireAuth()
@@ -773,25 +941,28 @@ func newServiceRenameCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := client.RenameService(id, name); err != nil {
+			res, err := client.RenameService(id, name)
+			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Server #%d renamed to %q.", id, name))
+			reportAction(res, fmt.Sprintf("Server #%d renamed to %q.", id, name))
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "new hostname")
+	cmd.Flags().StringVar(&name, "name", "", "new name (1-30 characters)")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
 
 func newServiceReinstallCmd() *cobra.Command {
 	var (
-		osID int
-		yes  bool
+		osID    int
+		yes     bool
+		wait    bool
+		timeout time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -799,16 +970,16 @@ func newServiceReinstallCmd() *cobra.Command {
 		Short: "Reinstall the OS on a server",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet server reinstall 42 --os 3
-  arianet server reinstall 42 --os 3 --yes`,
+  arianet server reinstall 42 --os 3 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid service ID: %s", args[0])
+				return err
 			}
 
 			if !yes {
-				printer.Warn("Reinstalling will erase all data on the server.")
-				if !confirm(fmt.Sprintf("Reinstall OS on server #%d?", id)) {
+				printer.Warn("Reinstalling erases all data on the server.")
+				if !confirm(fmt.Sprintf("Reinstall the OS on server #%d?", id)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -820,32 +991,46 @@ func newServiceReinstallCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := client.ReinstallService(id, osID); err != nil {
+			res, err := client.ReinstallService(id, osID)
+			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Server #%d OS reinstall queued.", id))
+			reportAction(res, fmt.Sprintf("Server #%d reinstall started.", id))
+			maybeWait(client, id, waitReinstalled(), wait, timeout)
 			return nil
 		},
 	}
 
 	cmd.Flags().IntVar(&osID, "os", 0, "OS template ID (see: arianet os list)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
+	addWaitFlags(cmd, &wait, &timeout)
 	_ = cmd.MarkFlagRequired("os")
 	return cmd
 }
 
 func newServiceProtectCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "toggle-protection <id>",
-		Short:   "Toggle deletion protection on a server",
-		Args:    cobra.ExactArgs(1),
-		Example: `  arianet server toggle-protection 42`,
+	var enable, disable bool
+
+	cmd := &cobra.Command{
+		Use:   "toggle-protection <id>",
+		Short: "Turn deletion protection on or off",
+		Long: `Turn deletion protection on or off.
+
+With --enable or --disable the state is set explicitly (safe to repeat in
+scripts). With neither, the current state is flipped.`,
+		Args: cobra.ExactArgs(1),
+		Example: `  arianet server toggle-protection 42 --enable
+  arianet server toggle-protection 42 --disable
+  arianet server toggle-protection 42`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(args[0])
+			id, err := parseServerID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid service ID: %s", args[0])
+				return err
+			}
+			if enable && disable {
+				return fmt.Errorf("use either --enable or --disable, not both")
 			}
 
 			client, err := requireAuth()
@@ -854,13 +1039,30 @@ func newServiceProtectCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := client.ToggleServiceProtection(id); err != nil {
+			var res *api.ActionResult
+			switch {
+			case enable:
+				res, err = client.SetServiceProtection(id, true)
+			case disable:
+				res, err = client.SetServiceProtection(id, false)
+			default:
+				res, err = client.ToggleServiceProtection(id)
+			}
+			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("Server #%d deletion protection toggled.", id))
+			state := "toggled"
+			if res.Protected != nil {
+				state = map[bool]string{true: "enabled", false: "disabled"}[*res.Protected]
+			}
+			reportAction(res, fmt.Sprintf("Server #%d deletion protection %s.", id, state))
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&enable, "enable", false, "turn protection on")
+	cmd.Flags().BoolVar(&disable, "disable", false, "turn protection off")
+	return cmd
 }

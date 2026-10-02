@@ -29,10 +29,16 @@ func newSSHCmd() *cobra.Command {
 }
 
 func newSSHListCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		page  int
+		limit int
+	)
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List your SSH keys",
 		Example: `  arianet ssh list
+  arianet ssh list --page 2 --limit 20
   arianet ssh list --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := requireAuth()
@@ -41,36 +47,44 @@ func newSSHListCmd() *cobra.Command {
 				return nil
 			}
 
-			keys, err := client.ListSSHKeys()
+			keys, pagination, err := client.ListSSHKeys(page, limit)
 			if err != nil {
 				handleAPIError(err)
 				return nil
 			}
 
 			p := printer.New(cfg.Output)
-			if cfg.Output == printer.FormatJSON {
+			if jsonMode() {
 				p.PrintJSON(keys)
 				return nil
 			}
 
 			if len(keys) == 0 {
 				printer.Info("No SSH keys found.")
-				printer.Info("Add one with: arianet ssh add --name my-key --key-file ~/.ssh/id_rsa.pub --region 1")
+				printer.Info("Add one with: arianet ssh add --name my-key --key-file ~/.ssh/id_ed25519.pub --region 1")
 				return nil
 			}
 
 			rows := make([][]string, len(keys))
 			for i, k := range keys {
-				rows[i] = []string{
-					strconv.Itoa(k.ID),
-					derefStr(k.Name),
-					k.CreatedAt,
+				region := "-"
+				if k.DatacenterID != nil {
+					region = strconv.Itoa(*k.DatacenterID)
 				}
+				rows[i] = []string{strconv.Itoa(k.ID), ptrOrDash(k.Name), region, k.CreatedAt}
 			}
-			p.Table([]string{"ID", "Name", "Created"}, rows)
+			p.Table([]string{"ID", "Name", "Region", "Created"}, rows)
+
+			if pagination != nil {
+				printer.PaginationFooter(pagination.CurrentPage, pagination.LastPage, int(pagination.Total), "SSH keys")
+			}
 			return nil
 		},
 	}
+
+	cmd.Flags().IntVarP(&page, "page", "p", 1, "page number")
+	cmd.Flags().IntVarP(&limit, "limit", "l", 15, "results per page (max 100)")
+	return cmd
 }
 
 func newSSHGetCmd() *cobra.Command {
@@ -99,9 +113,14 @@ func newSSHGetCmd() *cobra.Command {
 			}
 
 			p := printer.New(cfg.Output)
-			if cfg.Output == printer.FormatJSON {
+			if jsonMode() {
 				p.PrintJSON(key)
 				return nil
+			}
+
+			region := "-"
+			if key.DatacenterID != nil {
+				region = strconv.Itoa(*key.DatacenterID)
 			}
 
 			pubKey := key.Key
@@ -114,6 +133,7 @@ func newSSHGetCmd() *cobra.Command {
 				[][]string{
 					{"ID", strconv.Itoa(key.ID)},
 					{"Name", printer.Bold(derefStr(key.Name))},
+					{"Region", region},
 					{"Public Key", printer.Dim(pubKey)},
 					{"Created At", key.CreatedAt},
 				},
@@ -134,8 +154,8 @@ func newSSHAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Add an SSH key",
-		Example: `  arianet ssh add --name my-laptop --key-file ~/.ssh/id_rsa.pub --region 1
-  arianet ssh add --name my-laptop --key "ssh-rsa AAAA..." --region 1`,
+		Example: `  arianet ssh add --name my-laptop --key-file ~/.ssh/id_ed25519.pub --region 1
+  arianet ssh add --name my-laptop --key "ssh-ed25519 AAAA..." --region 1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keyValue := publicKey
 
@@ -162,12 +182,17 @@ func newSSHAddCmd() *cobra.Command {
 			req := api.CreateSSHKeyRequest{
 				Name:         name,
 				PublicKey:    keyValue,
-				DatacenterID: optIntPtr(datacenterID),
+				DatacenterID: datacenterID,
 			}
 
 			key, err := client.CreateSSHKey(req)
 			if err != nil {
 				handleAPIError(err)
+				return nil
+			}
+
+			if jsonMode() {
+				printer.New(cfg.Output).PrintJSON(key)
 				return nil
 			}
 
@@ -177,9 +202,9 @@ func newSSHAddCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "label for this SSH key")
-	cmd.Flags().StringVar(&publicKey, "key", "", "public key content (ssh-rsa ...)")
-	cmd.Flags().StringVar(&keyFile, "key-file", "", "path to public key file (e.g. ~/.ssh/id_rsa.pub)")
-	cmd.Flags().IntVar(&datacenterID, "region", 0, "datacenter ID to associate (see: arianet region list)")
+	cmd.Flags().StringVar(&publicKey, "key", "", "public key content (ssh-ed25519 AAAA...)")
+	cmd.Flags().StringVar(&keyFile, "key-file", "", "path to public key file (e.g. ~/.ssh/id_ed25519.pub)")
+	cmd.Flags().IntVar(&datacenterID, "region", 0, "region ID the key belongs to (see: arianet region list)")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("region")
@@ -190,9 +215,9 @@ func newSSHUpdateCmd() *cobra.Command {
 	var name string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
-		Short: "Update an SSH key",
-		Args:  cobra.ExactArgs(1),
+		Use:     "update <id>",
+		Short:   "Update an SSH key",
+		Args:    cobra.ExactArgs(1),
 		Example: `  arianet ssh update 3 --name new-label`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.Atoi(args[0])
@@ -209,6 +234,11 @@ func newSSHUpdateCmd() *cobra.Command {
 			key, err := client.UpdateSSHKey(id, api.UpdateSSHKeyRequest{Name: optStrPtr(name)})
 			if err != nil {
 				handleAPIError(err)
+				return nil
+			}
+
+			if jsonMode() {
+				printer.New(cfg.Output).PrintJSON(key)
 				return nil
 			}
 
@@ -255,7 +285,7 @@ func newSSHDeleteCmd() *cobra.Command {
 				return nil
 			}
 
-			printer.Success(fmt.Sprintf("SSH key #%d deleted.", id))
+			reportDeleted("SSH key", strconv.Itoa(id))
 			return nil
 		},
 	}

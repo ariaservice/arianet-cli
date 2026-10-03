@@ -33,8 +33,12 @@ scripts**, so nothing runs as root when you install or remove it.
 
 ```bash
 brew tap ariaservice/arianet-cli https://github.com/ariaservice/arianet-cli
+brew trust ariaservice/arianet-cli   # recent Homebrew versions refuse third-party taps until you trust them
 brew install arianet
 ```
+
+Read the formula first if you like: [Formula/arianet.rb](Formula/arianet.rb) only downloads the
+release archive from this repository and checks its SHA-256.
 
 ### Install script
 

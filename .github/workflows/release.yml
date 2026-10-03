@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and update Formula/arianet.rb
+      id-token: write # keyless cosign signing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: stable
+      - run: go test -count=1 ./...
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+      - uses: anchore/sbom-action/download-syft@fffec3d851af758d56fee099cf3fbf8aa8779843 # v0.24.3
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  apt-repo:
+    # Publishes a signed apt repository to the gh-pages branch. It needs the
+    # APT_GPG_PRIVATE_KEY secret; without it the job is skipped and the .deb
+    # files are still available on the release page.
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      HAS_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY != '' }}
+    steps:
+      - name: Skip when no signing key is configured
+        if: env.HAS_KEY != 'true'
+        run: echo "APT_GPG_PRIVATE_KEY is not set, skipping apt repository publish"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: env.HAS_KEY == 'true'
+      - name: Build and sign the apt repository
+        if: env.HAS_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils gnupg
+
+          export GNUPGHOME="$(mktemp -d)"
+          echo "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}')"
+          export KEYID
+
+          git fetch origin gh-pages:gh-pages 2>/dev/null || true
+          if git rev-parse --verify -q gh-pages >/dev/null; then
+            git worktree add ../pages gh-pages
+          else
+            git worktree add --orphan -b gh-pages ../pages
+          fi
+
+          cd ../pages
+          mkdir -p pool
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir pool --clobber
+
+          KEYID="$KEYID" "$GITHUB_WORKSPACE/scripts/build-apt-repo.sh" .
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "apt repository for $TAG"
+          git push origin gh-pages

@@ -3,7 +3,7 @@ package commands
 import (
 	"fmt"
 
-	"github.com/arianet/arianet-cli/pkg/version"
+	"github.com/ariaservice/arianet-cli/pkg/version"
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +15,7 @@ func newVersionCmd() *cobra.Command {
 			fmt.Printf("arianet %s\n", version.Version)
 			fmt.Printf("  commit:     %s\n", version.Commit)
 			fmt.Printf("  built:      %s\n", version.BuildDate)
-			fmt.Printf("  source:     https://github.com/arianet/arianet-cli\n")
+			fmt.Printf("  source:     https://github.com/ariaservice/arianet-cli\n")
 		},
 	}
 }

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arianet/arianet-cli/internal/api"
-	"github.com/arianet/arianet-cli/internal/printer"
+	"github.com/ariaservice/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
 

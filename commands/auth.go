@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/arianet/arianet-cli/internal/printer"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
 

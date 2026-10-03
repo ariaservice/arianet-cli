@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arianet/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/api"
 )
 
 func TestGeneratePassword(t *testing.T) {

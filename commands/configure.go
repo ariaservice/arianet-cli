@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/arianet/arianet-cli/internal/config"
-	"github.com/arianet/arianet-cli/internal/printer"
+	"github.com/ariaservice/arianet-cli/internal/config"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

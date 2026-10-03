@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arianet/arianet-cli/internal/config"
-	"github.com/arianet/arianet-cli/internal/printer"
+	"github.com/ariaservice/arianet-cli/internal/config"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 )
 
 // confirm prompts the user for a yes/no answer. Returns true if they confirm.

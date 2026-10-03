@@ -4,7 +4,11 @@ project_name: arianet
 
 before:
   hooks:
-    - go mod tidy
+    - rm -rf completions
+    - mkdir -p completions
+    - sh -c 'go run ./cmd/arianet completion bash > completions/arianet.bash'
+    - sh -c 'go run ./cmd/arianet completion zsh  > completions/_arianet'
+    - sh -c 'go run ./cmd/arianet completion fish > completions/arianet.fish'
 
 builds:
   - id: arianet
@@ -12,6 +16,9 @@ builds:
     binary: arianet
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux
       - darwin
@@ -24,73 +31,94 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X github.com/arianet/arianet-cli/pkg/version.Version={{.Version}}
-      - -X github.com/arianet/arianet-cli/pkg/version.Commit={{.ShortCommit}}
-      - -X github.com/arianet/arianet-cli/pkg/version.BuildDate={{.Date}}
+      - -X github.com/ariaservice/arianet-cli/pkg/version.Version={{.Version}}
+      - -X github.com/ariaservice/arianet-cli/pkg/version.Commit={{.ShortCommit}}
+      - -X github.com/ariaservice/arianet-cli/pkg/version.BuildDate={{.CommitDate}}
 
 archives:
   - id: arianet
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - README.md
+      - LICENSE
       - completions/*
 
 checksum:
   name_template: "checksums.txt"
 
-# Shell completions
-after_hooks:
-  - mkdir -p completions
-  - ./bin/arianet completion bash  > completions/arianet.bash  || true
-  - ./bin/arianet completion zsh   > completions/_arianet      || true
-  - ./bin/arianet completion fish  > completions/arianet.fish  || true
+# Software bill of materials for every archive.
+sboms:
+  - artifacts: archive
 
-# Homebrew tap
+# Keyless (Sigstore) signature over the checksum file. The checksum file
+# covers every archive and package, so verifying it covers the whole release.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+# Homebrew: the formula lives in this repository (Formula/arianet.rb), so
+#   brew tap ariaservice/arianet-cli https://github.com/ariaservice/arianet-cli
+#   brew install arianet
 brews:
-  - name: arianet-cli
+  - name: arianet
     repository:
-      owner: arianet
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://arianet.ir"
-    description: "Official CLI for the Arianet cloud platform"
-    license: "Proprietary"
+      owner: ariaservice
+      name: arianet-cli
+      branch: main
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: Formula
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} {{ .Tag }}"
+    homepage: "https://github.com/ariaservice/arianet-cli"
+    description: "Command-line client for the Ariaservice cloud API"
+    license: "MIT"
     install: |
       bin.install "arianet"
       bash_completion.install "completions/arianet.bash" => "arianet"
       zsh_completion.install "completions/_arianet"
       fish_completion.install "completions/arianet.fish"
     test: |
-      system "#{bin}/arianet version"
+      assert_match version.to_s, shell_output("#{bin}/arianet version")
 
-# .deb and .rpm packages (Linux)
+# .deb and .rpm packages (Linux). Contents are the binary, shell completions
+# and the licence only; there are no maintainer scripts, so installing or
+# removing the package never runs anything as root.
 nfpms:
   - id: arianet-packages
-    package_name: arianet-cli
-    vendor: Arianet
-    homepage: https://arianet.ir
-    maintainer: Arianet <support@arianet.ir>
-    description: Official CLI for the Arianet cloud platform
-    license: Proprietary
+    package_name: arianet
+    vendor: Ariaservice
+    homepage: https://github.com/ariaservice/arianet-cli
+    maintainer: Ariaservice <support@ariaservice.net>
+    description: |-
+      Command-line client for the Ariaservice cloud API.
+      Manage servers, SSH keys, firewalls and balance from the terminal.
+    license: MIT
     formats:
       - deb
       - rpm
     bindir: /usr/bin
     contents:
       - src: completions/arianet.bash
-        dst: /etc/bash_completion.d/arianet
+        dst: /usr/share/bash-completion/completions/arianet
       - src: completions/_arianet
         dst: /usr/share/zsh/vendor-completions/_arianet
       - src: completions/arianet.fish
-        dst: /usr/share/fish/completions/arianet.fish
+        dst: /usr/share/fish/vendor_completions.d/arianet.fish
+      - src: LICENSE
+        dst: /usr/share/doc/arianet/copyright
 
-# GitHub release
 release:
   github:
-    owner: arianet
+    owner: ariaservice
     name: arianet-cli
   draft: false
   prerelease: auto

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arianet/arianet-cli/internal/printer"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 )
 
 // ─── Example 1: List Command with Multiple Output Formats ──────────────

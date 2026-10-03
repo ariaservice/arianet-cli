@@ -1,41 +1,116 @@
 # Arianet CLI
 
-The official command-line interface for the [Arianet](https://ariaservice.net) cloud platform. Manage your cloud servers, SSH keys, firewalls, invoices and account balance directly from the terminal.
+The official command-line client for the [Ariaservice / Arianet](https://ariaservice.net) cloud
+platform. It talks to the public REST API at `https://api.ariaservice.net` and lets you manage your
+own servers, SSH keys, firewalls, invoices and account balance from a terminal or a script.
+
+It is a single static binary, MIT licensed, and the source in this repository is everything that
+ships. See [What it does and does not do](#what-it-does-and-does-not-do) before installing.
 
 ---
 
 ## Installation
 
-### Download binary
-
-Download the latest release from the [releases page](https://github.com/ariaservice/arianet-cli/releases) and place it in your `PATH`:
+### Ubuntu / Debian (apt)
 
 ```bash
-# macOS / Linux
-chmod +x arianet
-sudo mv arianet /usr/local/bin/
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://ariaservice.github.io/arianet-cli/arianet-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/arianet.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/arianet.gpg] https://ariaservice.github.io/arianet-cli stable main" \
+  | sudo tee /etc/apt/sources.list.d/arianet.list
+sudo apt update && sudo apt install arianet
 ```
+
+The repository is signed. The key is scoped to this one repository through `signed-by`, so it is not
+trusted for anything else on your system. Its fingerprint is
+`305A 2F52 0920 153A FC89  8F4A C420 B09C 99E5 515B`; the public key is also committed at
+[packaging/apt-signing-key.asc](packaging/apt-signing-key.asc) so you can compare it. The package
+contains the binary, shell completions and the licence only, and has **no install or removal
+scripts**, so nothing runs as root when you install or remove it.
+
+### macOS and Linux (Homebrew)
+
+```bash
+brew tap ariaservice/arianet-cli https://github.com/ariaservice/arianet-cli
+brew install arianet
+```
+
+### Install script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ariaservice/arianet-cli/main/scripts/install.sh | sh
+```
+
+[Read the script first](scripts/install.sh): it downloads the release archive, verifies its SHA-256
+against `checksums.txt` (and the signature too if you have `cosign`), and copies one file into
+`~/.local/bin` (or `/usr/local/bin` when writable). Nothing else.
+
+### Manual download and verification
+
+Download the archive for your platform plus `checksums.txt` from the
+[releases page](https://github.com/ariaservice/arianet-cli/releases), then:
+
+```bash
+sha256sum --check --ignore-missing checksums.txt        # macOS: shasum -a 256 -c --ignore-missing checksums.txt
+tar -xzf arianet_<version>_<os>_<arch>.tar.gz
+sudo install -m 0755 arianet /usr/local/bin/arianet
+```
+
+Optionally verify that `checksums.txt` was produced by this repository's release workflow
+(keyless [Sigstore](https://www.sigstore.dev/) signature, no key to trust or rotate):
+
+```bash
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/ariaservice/arianet-cli/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+```
+
+Each release also ships an SBOM (`*.sbom.json`) for every archive.
 
 ### Build from source
 
 ```bash
 git clone https://github.com/ariaservice/arianet-cli.git
 cd arianet-cli
-go build -o arianet ./cmd/arianet
-sudo mv arianet /usr/local/bin/
+go build -trimpath -o arianet ./cmd/arianet
 ```
+
+---
+
+## What it does and does not do
+
+- Sends HTTPS requests to **one host**, the API URL you configured (default
+  `https://api.ariaservice.net`), with your API token as a bearer token. Nothing else is contacted.
+- **No telemetry, no analytics, no update checks, no background processes.**
+- Does not execute other programs, does not read your SSH private keys (`ssh add` reads only the
+  public key file you point it at), does not modify anything outside its own config file.
+- Writes exactly one file: `config.yaml` in your user config directory, mode `0600` inside a `0700`
+  directory. The API token is the only secret in it. You can avoid the file entirely by using the
+  `ARIANET_TOKEN` environment variable.
+- Refuses to send the token over plain `http://` (except to `localhost` for development), refuses
+  an API URL that embeds credentials, and does not follow redirects to another host.
+- Strips terminal control characters from anything the server returns before printing it.
+
+Tokens are created and revoked at https://cloud.ariaservice.net/users/api-tokens; use a token with
+only the scopes you need. See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ---
 
 ## Quick Start
 
-**1. Configure your API token:**
+**1. Configure your API token** (typed without echo, stored with `0600` permissions):
 
 ```bash
-arianet configure --token <your-api-token>
+arianet configure
+# or, from a script / password manager:
+printf '%s' "$ARIANET_TOKEN" | arianet configure --token-stdin
 ```
 
-Generate a token at: https://cloud.ariaservice.net/users/api-tokens
+Avoid `--token <value>` on shared machines: command-line arguments are visible to other local users
+and end up in shell history.
 
 **2. Verify authentication:**
 

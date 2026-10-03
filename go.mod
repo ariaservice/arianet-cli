@@ -1,4 +1,4 @@
-module github.com/arianet/arianet-cli
+module github.com/ariaservice/arianet-cli
 
 go 1.22
 

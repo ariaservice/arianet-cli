@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/arianet/arianet-cli/internal/api"
-	"github.com/arianet/arianet-cli/internal/config"
-	"github.com/arianet/arianet-cli/internal/printer"
+	"github.com/ariaservice/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/config"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +16,7 @@ var (
 	tokenOverride  string
 	apiURLOverride string
 	cfg            *config.Config
+	cfgErr         error
 )
 
 var rootCmd = &cobra.Command{
@@ -69,8 +70,9 @@ func init() {
 func initConfig() {
 	var err error
 	cfg, err = config.Load(tokenOverride)
+	cfgErr = err
 	if err != nil {
-		// Non-fatal — commands that require config will check themselves
+		// Commands that need the config report cfgErr from requireAuth.
 		cfg = &config.Config{
 			APIURL: config.DefaultAPIURL,
 			Output: "table",
@@ -88,6 +90,12 @@ func initConfig() {
 // requireAuth checks that a token is configured and returns an API client.
 // Commands that need authentication call this helper.
 func requireAuth() (*api.Client, error) {
+	if cfgErr != nil {
+		return nil, cfgErr
+	}
+	if err := config.ValidateAPIURL(cfg.APIURL); err != nil {
+		return nil, err
+	}
 	if cfg.Token == "" {
 		return nil, fmt.Errorf(
 			"no API token configured\n\n" +

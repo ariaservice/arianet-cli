@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arianet/arianet-cli/pkg/version"
+	"github.com/ariaservice/arianet-cli/pkg/version"
 )
 
 const (

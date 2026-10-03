@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arianet/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/api"
 )
 
 const (

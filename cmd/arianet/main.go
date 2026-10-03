@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/arianet/arianet-cli/commands"
+	"github.com/ariaservice/arianet-cli/commands"
 )
 
 func main() {

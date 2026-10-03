@@ -22,7 +22,7 @@ func TestGeneratePassword(t *testing.T) {
 		if len(pw) != 20 {
 			t.Fatalf("length %d", len(pw))
 		}
-		var up, lo, di bool
+		var up, lo, di, sy bool
 		for _, r := range pw {
 			switch {
 			case r >= 'A' && r <= 'Z':
@@ -31,11 +31,13 @@ func TestGeneratePassword(t *testing.T) {
 				lo = true
 			case r >= '0' && r <= '9':
 				di = true
+			case strings.ContainsRune("@#%+=", r):
+				sy = true
 			default:
 				t.Fatalf("unexpected character %q", r)
 			}
 		}
-		if !up || !lo || !di {
+		if !up || !lo || !di || !sy {
 			t.Fatalf("%q lacks a character class", pw)
 		}
 		seen[pw] = true
@@ -221,5 +223,14 @@ func TestWaitTimesOutAndAbortsOnAuthError(t *testing.T) {
 	defer srv.Close()
 	if got := waitForServer(api.New(srv.URL, "x"), 1, waitProvisioned(), time.Second); got != waitAborted {
 		t.Errorf("outcome = %v, want aborted", got)
+	}
+}
+
+func TestIsStoppedAcceptsProviderVariants(t *testing.T) {
+	for state, want := range map[string]bool{"STOPPED": true, "SHUTOFF": true, "RUNNING": false, "POWERING_OFF": false} {
+		s := state
+		if got := isStopped(&api.ServiceStatus{Status: "active", InstanceStatus: &s}); got != want {
+			t.Errorf("isStopped(%s) = %v, want %v", state, got, want)
+		}
 	}
 }

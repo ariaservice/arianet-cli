@@ -183,6 +183,7 @@ type Service struct {
 	ID             int                `json:"id"`
 	Status         string             `json:"status"`
 	InstanceStatus *string            `json:"instance_status"`
+	Name           *string            `json:"name"`
 	Hostname       *string            `json:"hostname"`
 	Protected      *bool              `json:"protected"`
 	Cycle          *string            `json:"cycle"`

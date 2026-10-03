@@ -53,7 +53,11 @@ func isRunning(st *api.ServiceStatus) bool {
 }
 
 func isStopped(st *api.ServiceStatus) bool {
-	return strings.ToUpper(st.ProviderStatus()) == "STOPPED" && st.Status == "active"
+	switch strings.ToUpper(st.ProviderStatus()) {
+	case "STOPPED", "SHUTOFF", "SHUTDOWN":
+		return st.Status == "active"
+	}
+	return false
 }
 
 func failedStatus(st *api.ServiceStatus) bool {

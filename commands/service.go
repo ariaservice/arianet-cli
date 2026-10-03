@@ -138,7 +138,10 @@ restarting and reinstalling_os.`,
 					ip = printer.Dim("pending")
 				}
 
-				hostname := derefStr(s.Hostname)
+				hostname := derefStr(s.Name)
+				if hostname == "" {
+					hostname = derefStr(s.Hostname)
+				}
 				if hostname == "" {
 					hostname = printer.Dim(fmt.Sprintf("(ID: %d)", s.ID))
 				}
@@ -179,7 +182,7 @@ restarting and reinstalling_os.`,
 
 			p.TableAdvanced(
 				"Cloud Servers",
-				[]string{"ID", "Hostname", "Status", "Provider", "IP Address", "Plan", "Region", "OS", "Protected"},
+				[]string{"ID", "Name", "Status", "Provider", "IP Address", "Plan", "Region", "OS", "Protected"},
 				rows,
 			)
 
@@ -247,6 +250,7 @@ func newServiceGetCmd() *cobra.Command {
 				[]string{"Field", "Value"},
 				[][]string{
 					{"ID", strconv.Itoa(s.ID)},
+					{"Name", ptrOrDash(s.Name)},
 					{"Hostname", ptrOrDash(s.Hostname)},
 					{"Status", printer.StatusColor(s.Status)},
 					{"Provider Status", strings.ToLower(ptrOrDash(s.InstanceStatus))},

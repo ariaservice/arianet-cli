@@ -71,13 +71,15 @@ func newIdempotencyKey() string {
 	return "cli-" + hex.EncodeToString(b[:])
 }
 
-// generatePassword builds a root password with upper case, lower case and
-// digits. Letters and digits only, so every provider accepts it.
+// generatePassword builds a root password with upper case, lower case, digits
+// and one symbol (the API requires a symbol). The symbols are a conservative
+// set that providers and shells handle safely.
 func generatePassword(length int) (string, error) {
 	const (
 		upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 		lower = "abcdefghijkmnopqrstuvwxyz"
 		digit = "23456789"
+		sym   = "@#%+="
 		all   = upper + lower + digit
 	)
 	pick := func(set string) (byte, error) {
@@ -89,7 +91,7 @@ func generatePassword(length int) (string, error) {
 	}
 
 	out := make([]byte, 0, length)
-	for _, set := range []string{upper, lower, digit} {
+	for _, set := range []string{upper, lower, digit, sym} {
 		c, err := pick(set)
 		if err != nil {
 			return "", err

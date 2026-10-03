@@ -247,3 +247,28 @@ func TestSupportLabel(t *testing.T) {
 		t.Errorf("unknown = %q", got)
 	}
 }
+
+func TestCheckPublicKey(t *testing.T) {
+	ok := []string{
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq me@laptop",
+		"ssh-rsa AAAAB3NzaC1yc2E",
+		"ecdsa-sha2-nistp256 AAAAE2VjZHNh",
+		"sk-ssh-ed25519@openssh.com AAAAGnNr",
+	}
+	bad := []string{
+		"",
+		"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXkt\n-----END OPENSSH PRIVATE KEY-----",
+		"ssh-ed25519AAAA",
+		"hello world",
+	}
+	for _, k := range ok {
+		if err := checkPublicKey(k); err != nil {
+			t.Errorf("checkPublicKey(%q) rejected: %v", k, err)
+		}
+	}
+	for _, k := range bad {
+		if err := checkPublicKey(k); err == nil {
+			t.Errorf("checkPublicKey(%q) accepted", k)
+		}
+	}
+}

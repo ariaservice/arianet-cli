@@ -84,6 +84,7 @@ func initConfig() {
 	}
 	if apiURLOverride != "" {
 		cfg.APIURL = apiURLOverride
+		cfg.APIURLSource = "--api-url"
 	}
 }
 
@@ -99,10 +100,17 @@ func requireAuth() (*api.Client, error) {
 	if cfg.Token == "" {
 		return nil, fmt.Errorf(
 			"no API token configured\n\n" +
-				"Run:  arianet configure --token <your-token>\n" +
+				"Run:  arianet configure\n" +
 				"Or set the ARIANET_TOKEN environment variable.\n\n" +
 				"Generate tokens at: https://cloud.ariaservice.net/users/api-tokens",
 		)
+	}
+	if cfg.APIURL != config.DefaultAPIURL {
+		source := cfg.APIURLSource
+		if source == "" {
+			source = "unknown source"
+		}
+		fmt.Fprintf(os.Stderr, "Warning: sending your token to %s (from %s), not %s\n", cfg.APIURL, source, config.DefaultAPIURL)
 	}
 	return api.New(cfg.APIURL, cfg.Token), nil
 }

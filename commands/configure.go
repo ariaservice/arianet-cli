@@ -36,8 +36,7 @@ and is saved in your shell history.
 
 Examples:
   arianet configure
-  echo "$ARIANET_TOKEN" | arianet configure --token-stdin
-  arianet configure --token <your-api-token>
+  printf '%s' "$ARIANET_TOKEN" | arianet configure --token-stdin
   arianet configure --output json
   arianet configure show`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -56,7 +55,7 @@ Examples:
 				}
 			}
 			if cmd.Flags().Changed("token") || tokenStdin || cmd.Flags().Changed("api-url") || cmd.Flags().Changed("output") {
-				existing, _ := config.Load("")
+				existing, _ := config.LoadFile()
 				if existing == nil {
 					existing = &config.Config{
 						APIURL: config.DefaultAPIURL,
@@ -122,7 +121,7 @@ Examples:
 
 func runInteractiveConfigure() error {
 	reader := bufio.NewReader(os.Stdin)
-	existing, _ := config.Load("")
+	existing, _ := config.LoadFile()
 	if existing == nil {
 		existing = &config.Config{
 			APIURL: config.DefaultAPIURL,
@@ -139,7 +138,7 @@ func runInteractiveConfigure() error {
 	} else {
 		fmt.Print("API Token: ")
 	}
-	tokenInput := readLine(reader)
+	tokenInput := readSecret(reader)
 	if tokenInput != "" {
 		existing.Token = tokenInput
 	}

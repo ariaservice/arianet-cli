@@ -13,13 +13,13 @@ func TestValidateAPIURL(t *testing.T) {
 		"http://localhost:8080",
 		"http://127.0.0.1:9000",
 		"http://[::1]:9000",
-		"http://api.localhost",
 	}
 	bad := []string{
 		"",
 		"api.ariaservice.net",
 		"http://api.ariaservice.net",
 		"http://evil.example/localhost",
+		"http://api.localhost",
 		"ftp://api.ariaservice.net",
 		"https://user:pass@api.ariaservice.net",
 		"https://",
@@ -80,5 +80,35 @@ func TestSaveRefusesInsecureURL(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	if err := Save(&Config{Token: "t", APIURL: "http://api.example.com", Output: "table"}); err == nil {
 		t.Fatal("Save accepted a plain-http remote URL")
+	}
+}
+
+func TestLoadFileIgnoresEnvironment(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(EnvToken, "env-token")
+	t.Setenv(EnvAPIURL, "http://localhost:8030")
+
+	if err := Save(&Config{Token: "file-token", APIURL: DefaultAPIURL, Output: "table"}); err != nil {
+		t.Fatal(err)
+	}
+
+	fromFile, err := LoadFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromFile.Token != "file-token" || fromFile.APIURL != DefaultAPIURL {
+		t.Errorf("LoadFile picked up the environment: %+v", fromFile)
+	}
+	if fromFile.APIURLSource != "config file" {
+		t.Errorf("APIURLSource = %q, want config file", fromFile.APIURLSource)
+	}
+
+	merged, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Token != "env-token" || merged.APIURL != "http://localhost:8030" || merged.APIURLSource != EnvAPIURL {
+		t.Errorf("Load ignored the environment: %+v", merged)
 	}
 }

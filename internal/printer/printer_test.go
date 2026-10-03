@@ -19,3 +19,16 @@ func TestCleanStripsTerminalControls(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanLineKeepsOneLineAndDropsBidi(t *testing.T) {
+	cases := map[string]string{
+		"a\tb\nc":                 "a b c",
+		"name\u202eevil\u202c":    "nameevil",
+		"x\u2066y\u2069z\u2028w": "xyzw",
+	}
+	for in, want := range cases {
+		if got := CleanLine(in); got != want {
+			t.Errorf("CleanLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

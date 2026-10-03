@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -22,6 +21,10 @@ type Config struct {
 	Token  string `mapstructure:"token"`
 	APIURL string `mapstructure:"api_url"`
 	Output string `mapstructure:"output"`
+
+	// APIURLSource names where APIURL came from ("config file", the
+	// ARIANET_API_URL variable, a flag) or is empty for the built-in default.
+	APIURLSource string `mapstructure:"-"`
 }
 
 // Dir returns the config directory path (~/.config/arianet).
@@ -50,6 +53,17 @@ func FilePath() (string, error) {
 // Environment variables take precedence over the config file.
 // The tokenOverride (from --token flag) takes highest precedence.
 func Load(tokenOverride string) (*Config, error) {
+	return load(tokenOverride, true)
+}
+
+// LoadFile reads the config file alone. Commands that rewrite the file start
+// from this, so a token or URL that only lives in the environment for this
+// session is never written to disk behind the user's back.
+func LoadFile() (*Config, error) {
+	return load("", false)
+}
+
+func load(tokenOverride string, withEnv bool) (*Config, error) {
 	dir, err := Dir()
 	if err != nil {
 		return nil, err
@@ -63,10 +77,11 @@ func Load(tokenOverride string) (*Config, error) {
 	v.SetDefault("api_url", DefaultAPIURL)
 	v.SetDefault("output", "table")
 
-	// Environment variables override config file
-	v.SetEnvPrefix("ARIANET")
-	v.BindEnv("token", EnvToken)
-	v.BindEnv("api_url", EnvAPIURL)
+	if withEnv {
+		v.SetEnvPrefix("ARIANET")
+		v.BindEnv("token", EnvToken)
+		v.BindEnv("api_url", EnvAPIURL)
+	}
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -83,6 +98,13 @@ func Load(tokenOverride string) (*Config, error) {
 	// --token flag takes highest precedence
 	if tokenOverride != "" {
 		cfg.Token = tokenOverride
+	}
+
+	switch {
+	case withEnv && os.Getenv(EnvAPIURL) != "":
+		cfg.APIURLSource = EnvAPIURL
+	case v.ConfigFileUsed() != "" && v.InConfig("api_url"):
+		cfg.APIURLSource = "config file"
 	}
 
 	if err := ValidateAPIURL(cfg.APIURL); err != nil {
@@ -108,7 +130,7 @@ func ValidateAPIURL(raw string) error {
 		return nil
 	case "http":
 		host := u.Hostname()
-		if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		if host == "localhost" {
 			return nil
 		}
 		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {

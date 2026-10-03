@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/ariaservice/arianet-cli/internal/config"
 	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
@@ -100,9 +101,13 @@ func newLogoutCmd() *cobra.Command {
 				return nil
 			}
 
-			// Remove token from local config
-			cfg.Token = ""
-			_ = saveConfig()
+			// Forget the token only if it is the one stored in the file, and
+			// rewrite the file from its own contents so nothing from the
+			// environment or flags is persisted.
+			if stored, err := config.LoadFile(); err == nil && stored.Token != "" && stored.Token == cfg.Token {
+				stored.Token = ""
+				_ = config.Save(stored)
+			}
 
 			printer.Success("Logged out. Token has been revoked.")
 			return nil

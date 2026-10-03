@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -161,16 +163,18 @@ func newSSHAddCmd() *cobra.Command {
 
 			// Read from file if --key-file provided
 			if keyFile != "" {
-				expanded := expandHome(keyFile)
-				b, err := os.ReadFile(expanded)
+				read, err := readPublicKeyFile(expandHome(keyFile))
 				if err != nil {
 					return fmt.Errorf("cannot read key file %s: %w", keyFile, err)
 				}
-				keyValue = strings.TrimSpace(string(b))
+				keyValue = read
 			}
 
 			if keyValue == "" {
 				return fmt.Errorf("provide a public key via --key or --key-file")
+			}
+			if err := checkPublicKey(keyValue); err != nil {
+				return err
 			}
 
 			client, err := requireAuth()
@@ -303,4 +307,36 @@ func expandHome(path string) string {
 		}
 	}
 	return path
+}
+
+const maxPublicKeyBytes = 16 << 10
+
+func readPublicKeyFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxPublicKeyBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(b) > maxPublicKeyBytes {
+		return "", errors.New("the file is too large to be a public key")
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// checkPublicKey refuses anything that is not an OpenSSH public key before
+// it leaves the machine, in particular a private key picked by mistake.
+func checkPublicKey(key string) error {
+	if strings.Contains(key, "PRIVATE KEY") {
+		return errors.New("this is a private key; pass the matching .pub file instead")
+	}
+	for _, prefix := range []string{"ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-", "sk-ssh-ed25519@openssh.com ", "sk-ecdsa-sha2-"} {
+		if strings.HasPrefix(key, prefix) {
+			return nil
+		}
+	}
+	return errors.New("not an OpenSSH public key: it should start with ssh-ed25519, ssh-rsa or ecdsa-sha2-")
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ariaservice/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 )
 
 const (
@@ -140,7 +141,7 @@ func waitForServer(client *api.Client, id int, spec waitSpec, timeout time.Durat
 			return
 		}
 		lastLine, lastPrint = line, time.Now()
-		fmt.Fprintf(os.Stderr, "  [%s] %s\n", fmtElapsed(time.Since(start)), line)
+		fmt.Fprintf(os.Stderr, "  [%s] %s\n", fmtElapsed(time.Since(start)), printer.CleanLine(line))
 	}
 
 	fmt.Fprintf(os.Stderr, "\n  Waiting for server #%d (Ctrl+C stops waiting; the operation continues)\n", id)
@@ -152,12 +153,12 @@ func waitForServer(client *api.Client, id int, spec waitSpec, timeout time.Durat
 			say("server no longer exists")
 			return waitDone
 		case err != nil && !pollErrorIsTransient(err):
-			fmt.Fprintf(os.Stderr, "  Stopped waiting: %s\n", err.Error())
+			fmt.Fprintf(os.Stderr, "  Stopped waiting: %s\n", printer.CleanLine(err.Error()))
 			return waitAborted
 		case err != nil:
 			errCount++
 			if errCount >= maxPollErrors {
-				fmt.Fprintf(os.Stderr, "  Stopped waiting: %s\n", err.Error())
+				fmt.Fprintf(os.Stderr, "  Stopped waiting: %s\n", printer.CleanLine(err.Error()))
 				return waitAborted
 			}
 			say("status check failed, retrying: " + err.Error())

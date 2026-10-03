@@ -137,8 +137,8 @@ func newFirewallGetCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Printf("%s %s\n", printer.Bold("Firewall:"), printer.Cyan(derefStr(fw.Name)))
-			fmt.Printf("  ID: %d  |  Region: %s  |  Created: %s\n\n", fw.ID, regionCell(fw.DatacenterID), fw.CreatedAt)
+			fmt.Printf("%s %s\n", printer.Bold("Firewall:"), printer.Cyan(printer.CleanLine(derefStr(fw.Name))))
+			fmt.Printf("  ID: %d  |  Region: %s  |  Created: %s\n\n", fw.ID, regionCell(fw.DatacenterID), printer.CleanLine(fw.CreatedAt))
 
 			if len(fw.Rules) == 0 {
 				printer.Info("No rules configured.")

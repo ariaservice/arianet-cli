@@ -468,7 +468,7 @@ func printCreated(s *api.CreatedService, replayed, showPassword bool) {
 	printer.New(cfg.Output).Table([]string{"Field", "Value"}, rows)
 
 	if s.RootPassword != "" && showPassword {
-		fmt.Printf("\n  Root password: %s\n", s.RootPassword)
+		fmt.Printf("\n  Root password: %s\n", printer.CleanLine(s.RootPassword))
 		printer.Warn("Save this password now. It is not shown again.")
 	}
 }
@@ -502,14 +502,14 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 		fmt.Println("\n  Step 1 - Select a region")
 		fmt.Println()
 		for i, d := range list {
-			fmt.Printf("    %2d)  %s  %s (ID: %d)\n", i+1, wizardPad(d.Name, 28), d.Country, d.ID)
+			fmt.Printf("    %2d)  %s  %s (ID: %d)\n", i+1, wizardPad(d.Name, 28), printer.CleanLine(d.Country), d.ID)
 		}
 		n, err := wizardPromptInt(reader, "\n  Enter number", 1, len(list))
 		if err != nil {
 			return c, err
 		}
 		c.datacenterID = list[n-1].ID
-		fmt.Printf("  -> Region: %s\n", list[n-1].Name)
+		fmt.Printf("  -> Region: %s\n", printer.CleanLine(list[n-1].Name))
 	}
 
 	if c.planID == 0 {
@@ -545,7 +545,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 			return c, err
 		}
 		c.planID = plans[n-1].ID
-		fmt.Printf("  -> Plan: %s\n", plans[n-1].Name)
+		fmt.Printf("  -> Plan: %s\n", printer.CleanLine(plans[n-1].Name))
 	}
 
 	if c.osID == 0 {
@@ -567,7 +567,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 			return c, err
 		}
 		c.osID = images[n-1].ID
-		fmt.Printf("  -> OS: %s\n", images[n-1].Name)
+		fmt.Printf("  -> OS: %s\n", printer.CleanLine(images[n-1].Name))
 	}
 
 	if c.hostname == "" {
@@ -597,7 +597,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 				fmt.Println()
 				fmt.Printf("    %2d)  Generated root password\n", 1)
 				for i, k := range usable {
-					fmt.Printf("    %2d)  SSH key %s (ID: %d)\n", i+2, derefStr(k.Name), k.ID)
+					fmt.Printf("    %2d)  SSH key %s (ID: %d)\n", i+2, printer.CleanLine(derefStr(k.Name)), k.ID)
 				}
 				n, err := wizardPromptInt(reader, "\n  Enter number", 1, len(usable)+1)
 				if err != nil {
@@ -605,7 +605,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 				}
 				if n > 1 {
 					c.sshKeyID = usable[n-2].ID
-					fmt.Printf("  -> SSH key: %s\n", derefStr(usable[n-2].Name))
+					fmt.Printf("  -> SSH key: %s\n", printer.CleanLine(derefStr(usable[n-2].Name)))
 				}
 			}
 		}
@@ -617,6 +617,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 
 // wizardPad pads s to width visible columns, correctly handling Unicode (Persian, Arabic, etc.).
 func wizardPad(s string, width int) string {
+	s = printer.CleanLine(s)
 	pad := width - runewidth.StringWidth(s)
 	if pad < 0 {
 		pad = 0

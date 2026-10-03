@@ -72,7 +72,7 @@ func newPlanListCmd() *cobra.Command {
 				if i > 0 {
 					fmt.Println()
 				}
-				fmt.Println(printer.Bold(group.Name))
+				fmt.Println(printer.Bold(printer.CleanLine(group.Name)))
 				rows := make([][]string, len(group.Plans))
 				for j, pl := range group.Plans {
 					rows[j] = planToRow(pl)

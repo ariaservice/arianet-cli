@@ -34,7 +34,26 @@ func Clean(s string) string {
 }
 
 func isControl(r rune) bool {
-	return (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f)
+	switch {
+	case r < 0x20 && r != '\n' && r != '\t', r >= 0x7f && r <= 0x9f:
+		return true
+	// Bidi overrides and isolates can reorder what the reader sees; line and
+	// paragraph separators break the one-line promise of a cell.
+	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0x2028, r == 0x2029:
+		return true
+	}
+	return false
+}
+
+// CleanLine is Clean for text that must stay on one line, such as a table
+// cell or a status line, so a name cannot forge extra rows.
+func CleanLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, Clean(s))
 }
 
 // Format constants.
@@ -279,7 +298,7 @@ func (p *Printer) renderTable(title string, headers []string, rows [][]string) {
 	for i, row := range rows {
 		clean[i] = make([]string, len(row))
 		for j, cell := range row {
-			clean[i][j] = Clean(cell)
+			clean[i][j] = CleanLine(cell)
 		}
 	}
 	rows = clean
@@ -384,7 +403,7 @@ func (p *Printer) Detail(title string, rows [][]string) {
 			continue
 		}
 		pad := strings.Repeat(" ", maxKey-strWidth(row[0]))
-		fmt.Fprintf(p.Out, "  %s%s  %s\n", row[0], pad, row[1])
+		fmt.Fprintf(p.Out, "  %s%s  %s\n", CleanLine(row[0]), pad, CleanLine(row[1]))
 	}
 	fmt.Fprintln(p.Out)
 }

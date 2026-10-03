@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ariaservice/arianet-cli/internal/config"
 	"github.com/ariaservice/arianet-cli/internal/printer"
 )
 
@@ -25,10 +24,6 @@ func confirm(prompt string) bool {
 }
 
 // saveConfig persists the in-memory cfg to disk.
-func saveConfig() error {
-	return config.Save(cfg)
-}
-
 // derefStr safely dereferences a *string, returning "" if nil.
 func derefStr(s *string) string {
 	if s == nil {

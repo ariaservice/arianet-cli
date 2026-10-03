@@ -190,13 +190,14 @@ func TestFlattenOSUsesVersionsAndSkipsDisabled(t *testing.T) {
 			{ID: 1, Name: "Ubuntu", Status: true, Children: OSChildren{Data: []OSChild{
 				{ID: 11, Name: "22.04", Status: true},
 				{ID: 12, Name: "20.04", Status: false},
+				{ID: 13, Name: "Ubuntu 24.04 LTS", Status: true},
 			}}},
 			{ID: 2, Name: "Alpine", Status: true},
 			{ID: 3, Name: "Old", Status: false},
 		}},
 	}}
 	got := FlattenOS(groups)
-	if len(got) != 2 || got[0].ID != 11 || got[0].Name != "Ubuntu 22.04" || got[1].ID != 2 {
+	if len(got) != 3 || got[0].ID != 11 || got[0].Name != "Ubuntu 22.04" || got[1].Name != "Ubuntu 24.04 LTS" || got[2].ID != 2 {
 		t.Fatalf("got %+v", got)
 	}
 }

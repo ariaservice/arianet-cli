@@ -771,7 +771,7 @@ newest first, with their outcome.`,
 
 			rows := make([][]string, len(history.Actions))
 			for i, a := range history.Actions {
-				rows[i] = []string{a.Type, a.Status, ptrOrDash(a.StartedAt), ptrOrDash(a.FinishedAt), a.ID}
+				rows[i] = []string{a.Type, a.Status, ptrOrDash(a.StartedAt), ptrOrDash(a.FinishedAt), a.ID.String()}
 			}
 			p.Table([]string{"Operation", "Status", "Started", "Finished", "ID"}, rows)
 			return nil

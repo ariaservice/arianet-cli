@@ -299,7 +299,11 @@ func FlattenOS(groups []OSGroup) []OSEntry {
 				if !ch.Status {
 					continue
 				}
-				out = append(out, OSEntry{ID: ch.ID, Name: strings.TrimSpace(t.Name + " " + ch.Name), Family: g.Name})
+				name := strings.TrimSpace(ch.Name)
+				if !strings.HasPrefix(strings.ToLower(name), strings.ToLower(t.Name)) {
+					name = strings.TrimSpace(t.Name + " " + name)
+				}
+				out = append(out, OSEntry{ID: ch.ID, Name: name, Family: g.Name})
 			}
 		}
 	}

@@ -289,12 +289,12 @@ type ActionResult struct {
 }
 
 type ServerAction struct {
-	ID         string  `json:"id"`
-	Type       string  `json:"type"`
-	Status     string  `json:"status"`
-	StartedAt  *string `json:"started_at"`
-	FinishedAt *string `json:"finished_at"`
-	CreatedAt  string  `json:"created_at"`
+	ID         json.Number `json:"id"`
+	Type       string      `json:"type"`
+	Status     string      `json:"status"`
+	StartedAt  *string     `json:"started_at"`
+	FinishedAt *string     `json:"finished_at"`
+	CreatedAt  string      `json:"created_at"`
 }
 
 type ServerActions struct {

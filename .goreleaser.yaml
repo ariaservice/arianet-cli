@@ -66,16 +66,18 @@ signs:
     artifacts: checksum
     output: true
 
-# Homebrew: the formula lives in this repository (Formula/arianet.rb), so
-#   brew tap ariaservice/arianet-cli https://github.com/ariaservice/arianet-cli
-#   brew install arianet
+# Homebrew: the formula is pushed to the tap repository ariaservice/homebrew-arianet, so
+#   brew trust ariaservice/arianet
+#   brew install ariaservice/arianet/arianet
 brews:
   - name: arianet
     repository:
       owner: ariaservice
-      name: arianet-cli
+      name: homebrew-arianet
       branch: main
-      token: "{{ .Env.GITHUB_TOKEN }}"
+      git:
+        url: git@github.com:ariaservice/homebrew-arianet.git
+        private_key: "{{ .Env.HOMEBREW_TAP_KEY_PATH }}"
     directory: Formula
     commit_msg_template: "Brew formula update for {{ .ProjectName }} {{ .Tag }}"
     homepage: "https://github.com/ariaservice/arianet-cli"

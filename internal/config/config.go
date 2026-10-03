@@ -2,8 +2,11 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -82,17 +85,55 @@ func Load(tokenOverride string) (*Config, error) {
 		cfg.Token = tokenOverride
 	}
 
+	if err := ValidateAPIURL(cfg.APIURL); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// ValidateAPIURL refuses an API address that would send the token somewhere
+// it can be read: plain http is only accepted for a loopback host (local
+// development), and credentials embedded in the URL are never accepted.
+func ValidateAPIURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("api_url %q is not a valid URL", raw)
+	}
+	if u.User != nil {
+		return fmt.Errorf("api_url must not contain credentials")
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		host := u.Hostname()
+		if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+		return fmt.Errorf("api_url %q uses plain http, which would send your token unencrypted; use https", raw)
+	default:
+		return fmt.Errorf("api_url %q must start with https://", raw)
+	}
 }
 
 // Save writes the config to disk.
 func Save(cfg *Config) error {
+	if err := ValidateAPIURL(cfg.APIURL); err != nil {
+		return err
+	}
 	dir, err := Dir()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("cannot create config directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return fmt.Errorf("cannot restrict config directory: %w", err)
 	}
 
 	v := viper.New()
@@ -101,10 +142,25 @@ func Save(cfg *Config) error {
 	v.Set("api_url", cfg.APIURL)
 	v.Set("output", cfg.Output)
 
-	path := filepath.Join(dir, "config.yaml")
-	if err := v.WriteConfigAs(path); err != nil {
+	// The token is written to a private temp file (0600 from creation) and
+	// renamed into place, so it is never readable by other users, not even
+	// for an instant.
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml")
+	if err != nil {
 		return fmt.Errorf("cannot write config: %w", err)
 	}
-	// Restrict config file permissions (contains token)
-	return os.Chmod(path, 0600)
+	tmpName := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpName)
+
+	if err := os.Chmod(tmpName, 0600); err != nil {
+		return fmt.Errorf("cannot write config: %w", err)
+	}
+	if err := v.WriteConfigAs(tmpName); err != nil {
+		return fmt.Errorf("cannot write config: %w", err)
+	}
+	if err := os.Rename(tmpName, filepath.Join(dir, "config.yaml")); err != nil {
+		return fmt.Errorf("cannot write config: %w", err)
+	}
+	return nil
 }

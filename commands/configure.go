@@ -3,19 +3,22 @@ package commands
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/arianet/arianet-cli/internal/config"
 	"github.com/arianet/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func newConfigureCmd() *cobra.Command {
 	var (
-		token  string
-		apiURL string
-		output string
+		token      string
+		tokenStdin bool
+		apiURL     string
+		output     string
 	)
 
 	cmd := &cobra.Command{
@@ -23,16 +26,36 @@ func newConfigureCmd() *cobra.Command {
 		Short: "Configure the Arianet CLI",
 		Long: `Configure authentication and default settings for the Arianet CLI.
 
-Running without flags starts an interactive setup wizard.
+Running without flags starts an interactive setup wizard. The token is typed
+without being echoed to the screen.
+
+The token is stored in ~/.config/arianet/config.yaml, readable only by you
+(mode 0600). Prefer --token-stdin (or the interactive prompt) over --token:
+a token passed as an argument is visible to other users in the process list
+and is saved in your shell history.
 
 Examples:
   arianet configure
-  arianet configure --token spXPPrNtyu13XkJLQUqmFFCY58NUmNPQqQLTXTSrJkB8b
+  echo "$ARIANET_TOKEN" | arianet configure --token-stdin
+  arianet configure --token <your-api-token>
   arianet configure --output json
   arianet configure show`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Non-interactive: flags provided
-			if cmd.Flags().Changed("token") || cmd.Flags().Changed("api-url") || cmd.Flags().Changed("output") {
+			if cmd.Flags().Changed("token") && tokenStdin {
+				return fmt.Errorf("use either --token or --token-stdin, not both")
+			}
+			if tokenStdin {
+				raw, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4096))
+				if err != nil {
+					return fmt.Errorf("cannot read token from stdin: %w", err)
+				}
+				token = strings.TrimSpace(string(raw))
+				if token == "" {
+					return fmt.Errorf("no token received on stdin")
+				}
+			}
+			if cmd.Flags().Changed("token") || tokenStdin || cmd.Flags().Changed("api-url") || cmd.Flags().Changed("output") {
 				existing, _ := config.Load("")
 				if existing == nil {
 					existing = &config.Config{
@@ -66,6 +89,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&token, "token", "", "API token")
+	cmd.Flags().BoolVar(&tokenStdin, "token-stdin", false, "read the API token from stdin (keeps it out of process list and shell history)")
 	cmd.Flags().StringVar(&apiURL, "api-url", "", fmt.Sprintf("API base URL (default: %s)", config.DefaultAPIURL))
 	cmd.Flags().StringVar(&output, "output", "", "default output format: table|json")
 
@@ -142,6 +166,20 @@ func runInteractiveConfigure() error {
 	fmt.Println()
 	printer.Success(fmt.Sprintf("Configuration saved to %s", filePath))
 	return nil
+}
+
+// readSecret reads a line without echoing it when stdin is a terminal.
+func readSecret(r *bufio.Reader) string {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		fmt.Println()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
+	}
+	return readLine(r)
 }
 
 func readLine(r *bufio.Reader) string {

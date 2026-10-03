@@ -15,9 +15,23 @@ import (
 func datacenterTable(p *printer.Printer, list []api.DatacenterEntry) {
 	rows := make([][]string, len(list))
 	for i, d := range list {
-		rows[i] = []string{strconv.Itoa(d.ID), d.Name, d.Region, d.Country, d.Status}
+		rows[i] = []string{strconv.Itoa(d.ID), d.Name, d.Region, d.Country, d.Status,
+			supportLabel(d.Supports, "ssh_keys"), supportLabel(d.Supports, "firewalls")}
 	}
-	p.Table([]string{"ID", "Name", "Region", "Country", "Status"}, rows)
+	p.Table([]string{"ID", "Name", "Region", "Country", "Status", "SSH keys", "Firewalls"}, rows)
+}
+
+// supportLabel renders one capability flag; "-" means the API did not say.
+func supportLabel(supports map[string]bool, name string) string {
+	ok, known := supports[name]
+	switch {
+	case !known:
+		return "-"
+	case ok:
+		return "yes"
+	default:
+		return "no"
+	}
 }
 
 func flattenForDisplay(regions []api.Region) []api.DatacenterEntry {

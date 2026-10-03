@@ -17,6 +17,26 @@ func strWidth(s string) int {
 	return runewidth.StringWidth(s)
 }
 
+// Clean removes terminal control characters (escape sequences, backspaces,
+// bell, C1 controls) from text that came from the network, so a hostile
+// server name or message cannot rewrite what the user sees. Newlines and tabs
+// are kept.
+func Clean(s string) string {
+	if !strings.ContainsFunc(s, isControl) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isControl(r rune) bool {
+	return (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f)
+}
+
 // Format constants.
 const (
 	FormatTable   = "table"
@@ -73,27 +93,27 @@ func FormatValue(v interface{}) string {
 
 // Success prints a success message to stdout.
 func Success(msg string) {
-	fmt.Fprintf(os.Stdout, "\nSuccess: %s\n\n", msg)
+	fmt.Fprintf(os.Stdout, "\nSuccess: %s\n\n", Clean(msg))
 }
 
 // Error prints an error message to stderr.
 func Error(msg string) {
-	fmt.Fprintf(os.Stderr, "\nError: %s\n\n", msg)
+	fmt.Fprintf(os.Stderr, "\nError: %s\n\n", Clean(msg))
 }
 
 // Info prints an informational line to stdout.
 func Info(msg string) {
-	fmt.Fprintf(os.Stdout, "  %s\n", msg)
+	fmt.Fprintf(os.Stdout, "  %s\n", Clean(msg))
 }
 
 // Warn prints a warning line to stdout.
 func Warn(msg string) {
-	fmt.Fprintf(os.Stdout, "Warning: %s\n", msg)
+	fmt.Fprintf(os.Stdout, "Warning: %s\n", Clean(msg))
 }
 
 // Hint prints a hint line to stdout.
 func Hint(msg string) {
-	fmt.Fprintf(os.Stdout, "  Hint: %s\n", msg)
+	fmt.Fprintf(os.Stdout, "  Hint: %s\n", Clean(msg))
 }
 
 // EmptyState prints an empty-state message with an optional hint.
@@ -127,9 +147,9 @@ func PaginationFooter(current, last, total int, resource string) {
 // ErrorWithSuggestion prints an error with optional suggestions.
 func ErrorWithSuggestion(title string, details string, suggestions ...string) {
 	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "Error: %s\n", title)
+	fmt.Fprintf(os.Stdout, "Error: %s\n", Clean(title))
 	if details != "" {
-		fmt.Fprintf(os.Stdout, "       %s\n", details)
+		fmt.Fprintf(os.Stdout, "       %s\n", Clean(details))
 	}
 	if len(suggestions) > 0 {
 		fmt.Fprintf(os.Stdout, "\nSuggestions:\n")
@@ -254,6 +274,15 @@ func (p *Printer) renderTable(title string, headers []string, rows [][]string) {
 	if len(headers) == 0 {
 		return
 	}
+
+	clean := make([][]string, len(rows))
+	for i, row := range rows {
+		clean[i] = make([]string, len(row))
+		for j, cell := range row {
+			clean[i][j] = Clean(cell)
+		}
+	}
+	rows = clean
 
 	// Calculate column widths using visible character width (handles Persian/Arabic/CJK).
 	widths := make([]int, len(headers))

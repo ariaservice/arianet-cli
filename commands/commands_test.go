@@ -234,3 +234,16 @@ func TestIsStoppedAcceptsProviderVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestSupportLabel(t *testing.T) {
+	supports := map[string]bool{"firewalls": true, "ssh_keys": false}
+	if got := supportLabel(supports, "firewalls"); got != "yes" {
+		t.Errorf("firewalls = %q", got)
+	}
+	if got := supportLabel(supports, "ssh_keys"); got != "no" {
+		t.Errorf("ssh_keys = %q", got)
+	}
+	if got := supportLabel(nil, "firewalls"); got != "-" {
+		t.Errorf("unknown = %q", got)
+	}
+}

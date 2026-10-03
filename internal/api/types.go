@@ -82,6 +82,9 @@ type Datacenter struct {
 	Status      string  `json:"status"`
 	CountryCode *string `json:"country_code"`
 	Flag        string  `json:"flag"`
+	// Supports says which optional resources the datacenter offers (ssh_keys,
+	// firewalls); nil when the API did not report it.
+	Supports map[string]bool `json:"supports,omitempty"`
 }
 
 type RegionsData struct {
@@ -95,6 +98,8 @@ type DatacenterEntry struct {
 	Region  string `json:"region"`
 	Country string `json:"country"`
 	Status  string `json:"status"`
+
+	Supports map[string]bool `json:"-"`
 }
 
 // ─── OS Template ─────────────────────────────────────────────────────────────

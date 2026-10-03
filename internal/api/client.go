@@ -15,7 +15,12 @@ import (
 	"github.com/arianet/arianet-cli/pkg/version"
 )
 
-const defaultTimeout = 30 * time.Second
+const (
+	defaultTimeout = 30 * time.Second
+	// maxResponseBytes bounds what one reply may buffer, so a misbehaving
+	// server cannot exhaust memory.
+	maxResponseBytes = 16 << 20
+)
 
 // retryStep is the pause unit between retries (attempt n waits n*2 steps).
 var retryStep = time.Second
@@ -33,9 +38,23 @@ func New(baseURL, token string) *Client {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 		httpClient: &http.Client{
-			Timeout: defaultTimeout,
+			Timeout:       defaultTimeout,
+			CheckRedirect: refuseUnsafeRedirect,
 		},
 	}
+}
+
+// refuseUnsafeRedirect keeps the bearer token on the host and scheme it was
+// meant for: a redirect to another host, or from https to http, is not followed.
+func refuseUnsafeRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return errors.New("stopped after 5 redirects")
+	}
+	first := via[0]
+	if req.URL.Host != first.URL.Host || (first.URL.Scheme == "https" && req.URL.Scheme != "https") {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 // ─── Core HTTP helpers ────────────────────────────────────────────────────────
@@ -132,7 +151,7 @@ func (c *Client) attempt(method, path string, payload []byte, out interface{}, o
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return meta{}, &transportError{err}
 	}
@@ -267,6 +286,8 @@ func FlattenDatacenters(regions []Region) []DatacenterEntry {
 				Region:  r.Name,
 				Country: country,
 				Status:  d.Status,
+
+				Supports: d.Supports,
 			})
 		}
 	}

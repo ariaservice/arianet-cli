@@ -220,3 +220,38 @@ func TestPrimaryIP(t *testing.T) {
 		t.Errorf("fallback = %q", s.PrimaryIP())
 	}
 }
+
+func TestRedirectToOtherHostIsNotFollowed(t *testing.T) {
+	var leaked int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&leaked, 1)
+		writeJSON(w, 200, map[string]any{"success": true})
+	}))
+	t.Cleanup(other.Close)
+
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/steal", http.StatusTemporaryRedirect)
+	})
+	if _, err := c.GetMe(); err == nil {
+		t.Fatal("expected an error for a cross-host redirect")
+	}
+	if atomic.LoadInt32(&leaked) != 0 {
+		t.Fatal("request (with bearer token) was forwarded to another host")
+	}
+}
+
+func TestOversizedResponseIsBounded(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < 40; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	})
+	if _, err := c.GetMe(); err == nil {
+		t.Fatal("expected an error for an oversized/invalid body")
+	}
+}

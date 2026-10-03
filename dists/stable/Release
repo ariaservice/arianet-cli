@@ -1,0 +1,31 @@
+Architectures: amd64 arm64
+Codename: stable
+Components: main
+Date: Sat, 03 Oct 2026 11:58:59 +0000
+Label: arianet
+Origin: Ariaservice
+Suite: stable
+MD5Sum:
+ c6020b0451758179b55e0ff87f3984b1              148 Release
+ 7affe7997734dfaa6af75c2fb802251a              686 main/binary-amd64/Packages
+ 9ff99f696f001bde45d48934162c5c0e              495 main/binary-amd64/Packages.gz
+ d7d127c89155bcaa52b7a6d9ffa68f88              685 main/binary-arm64/Packages
+ a1e7b582305d5d16f04d40dc2d9eb654              494 main/binary-arm64/Packages.gz
+SHA1:
+ eddda4907ca7e69ee3d4c638dd2a830c2c8c3bdb              148 Release
+ 18beeb42a2aa07fcbe62e7de7fd4402c4700ac0c              686 main/binary-amd64/Packages
+ cd4229e87096ad67b52067cb71d808cb7d764579              495 main/binary-amd64/Packages.gz
+ 87e8d1a3e6f08a457395d63eed87be1d7e74f2ce              685 main/binary-arm64/Packages
+ 9f03acd4e1b057d8698bb749d17fe326aa9cda11              494 main/binary-arm64/Packages.gz
+SHA256:
+ d77529dad3d4ebe071760fc4f190e94689aab4e33a4eb9d0ef74b8cb92e57291              148 Release
+ cc841fdd16d616afde365cb78017264fe638f9f60c629eefed77c45ed2434e1e              686 main/binary-amd64/Packages
+ c361371bfc4a843103ee5d9f167c9fe1e34780ceaeafd2a3cae41cb36e19c7b1              495 main/binary-amd64/Packages.gz
+ e897ddcc11e8fa5e042e1597202ef01135463390642b2422db2a021cbe0aa944              685 main/binary-arm64/Packages
+ 5e970dab2d513daa20dad25e781b248e3faf51c0ef61e807239a333796fee4d7              494 main/binary-arm64/Packages.gz
+SHA512:
+ 20eb9b351540e825c3304666881973781706f38c1c71d4390ff7509aa426a6afb12dafa427f7ccd668c0a50bf7fccdc773a82a863c7300695d8f7e41f80d1adf              148 Release
+ 4c73236ac603606fc0e4300a81b57e3d9c33b513af8b71364cddffeada28a2c8919b06ebed49a92bc06f8ce79440e25af542b1f3cf53f67402bb5c62be14b0cf              686 main/binary-amd64/Packages
+ 160f1f1dff5ca3a2d1560d1b181b63cc8d0e95a040b841bd63f0b8973c8c90c3820a3e8dd63912f491602f4d7b2a3acd906db14c430a04b4d0ac4f2d77070c2a              495 main/binary-amd64/Packages.gz
+ 23cff92986777e2e796a5d2a84e9fc3deaeaa87e08fbce3879e8aaef72938afe481906d409a6684648643b2df69f2008eb72b563e810632b5611679d67f51b3e              685 main/binary-arm64/Packages
+ d9fc87a95d92fc09c7a7bafee6f24a342cc494cae1f0c3060f24708f4b6379bd214b78485d31cfd9ec029f302d39429d9ff10437796c529dc43506cff2633fb0              494 main/binary-arm64/Packages.gz

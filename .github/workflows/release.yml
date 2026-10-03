@@ -3,12 +3,21 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Re-publish the apt repository for an existing release (e.g. after adding
+  # the signing key); does not rebuild or re-upload release assets.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish to the apt repository
+        required: true
+        default: v0.1.0
 
 permissions:
   contents: read
 
 jobs:
   goreleaser:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release and update Formula/arianet.rb
@@ -36,6 +45,7 @@ jobs:
     # APT_GPG_PRIVATE_KEY secret; without it the job is skipped and the .deb
     # files are still available on the release page.
     needs: goreleaser
+    if: ${{ !cancelled() && (needs.goreleaser.result == 'success' || needs.goreleaser.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -53,7 +63,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
           APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils gnupg

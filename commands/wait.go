@@ -144,13 +144,13 @@ func waitForServer(client *api.Client, id int, spec waitSpec, timeout time.Durat
 		fmt.Fprintf(os.Stderr, "  [%s] %s\n", fmtElapsed(time.Since(start)), printer.CleanLine(line))
 	}
 
-	fmt.Fprintf(os.Stderr, "\n  Waiting for server #%d (Ctrl+C stops waiting; the operation continues)\n", id)
+	fmt.Fprintf(os.Stderr, "\n  Waiting for VPS #%d (Ctrl+C stops waiting; the operation continues)\n", id)
 
 	for {
 		st, err := client.GetServiceStatus(id)
 		switch {
 		case err != nil && spec.goneIsDone && api.IsNotFound(err):
-			say("server no longer exists")
+			say("VPS no longer exists")
 			return waitDone
 		case err != nil && !pollErrorIsTransient(err):
 			fmt.Fprintf(os.Stderr, "  Stopped waiting: %s\n", printer.CleanLine(err.Error()))
@@ -212,9 +212,9 @@ func fmtElapsed(d time.Duration) string {
 func finishWait(id int, spec waitSpec, outcome waitOutcome, timeout time.Duration) {
 	switch outcome {
 	case waitDone:
-		fmt.Fprintf(os.Stderr, "\n  %s finished for server #%d.\n\n", spec.label, id)
+		fmt.Fprintf(os.Stderr, "\n  %s finished for VPS #%d.\n\n", spec.label, id)
 	case waitFailed:
-		fmt.Fprintf(os.Stderr, "\n  %s failed for server #%d. Details: arianet vps actions %d\n\n", spec.label, id, id)
+		fmt.Fprintf(os.Stderr, "\n  %s failed for VPS #%d. Details: arianet vps actions %d\n\n", spec.label, id, id)
 		os.Exit(1)
 	case waitTimedOut:
 		fmt.Fprintf(os.Stderr, "\n  %s is still in progress after %s. Check: arianet vps status %d\n\n", spec.label, timeout, id)

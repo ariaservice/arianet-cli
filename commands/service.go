@@ -43,7 +43,7 @@ func jsonMode() bool { return cfg != nil && cfg.Output == printer.FormatJSON }
 func parseServerID(arg string) (int, error) {
 	id, err := strconv.Atoi(arg)
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("invalid server ID: %s", arg)
+		return 0, fmt.Errorf("invalid VPS ID: %s", arg)
 	}
 	return id, nil
 }
@@ -86,10 +86,10 @@ func newServiceListCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List your VPS servers",
-		Long: `List your VPS servers.
+		Short: "List your VPS",
+		Long: `List your VPS.
 
-Without --status, active and suspended servers are shown. Other statuses
+Without --status, active and suspended VPS are shown. Other statuses
 include creating, pending, failed, terminated, powering_on, powering_off,
 restarting and reinstalling_os.`,
 		Example: `  arianet vps list
@@ -119,13 +119,13 @@ restarting and reinstalling_os.`,
 			if len(services) == 0 {
 				if status == "" {
 					printer.EmptyState(
-						"No active or suspended servers found",
-						"Use --status to view other servers or create one with: arianet vps create",
+						"No active or suspended VPS found",
+						"Use --status to view other VPS or create one with: arianet vps create",
 					)
 				} else {
 					printer.EmptyState(
-						fmt.Sprintf("No %s servers found", status),
-						"Try a different status or create a new server with: arianet vps create",
+						fmt.Sprintf("No %s VPS found", status),
+						"Try a different status or create a new VPS with: arianet vps create",
 					)
 				}
 				return nil
@@ -181,13 +181,13 @@ restarting and reinstalling_os.`,
 			}
 
 			p.TableAdvanced(
-				"Cloud Servers",
+				"VPS",
 				[]string{"ID", "Name", "Status", "Provider", "IP Address", "Plan", "Region", "OS", "Protected"},
 				rows,
 			)
 
 			if pagination != nil && pagination.LastPage > 1 {
-				printer.PaginationFooter(pagination.CurrentPage, pagination.LastPage, int(pagination.Total), "servers")
+				printer.PaginationFooter(pagination.CurrentPage, pagination.LastPage, int(pagination.Total), "VPS")
 			}
 			return nil
 		},
@@ -202,7 +202,7 @@ restarting and reinstalling_os.`,
 func newServiceGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <id>",
-		Short: "Get details of a server",
+		Short: "Get details of a VPS",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet vps get 42
   arianet vps get 42 --output json`,
@@ -295,11 +295,11 @@ Authentication: pass --ssh-key <id> to log in with a stored SSH key, or
 --password to set the root password yourself. With neither, a strong random
 root password is generated and printed once - save it.
 
-The command waits until the server is active (up to --timeout). Use
+The command waits until the VPS is active (up to --timeout). Use
 --no-wait to return as soon as the order is accepted.
 
 Every order carries an idempotency key, so a retry after a network failure can
-never buy a second server. If the command is interrupted before it can tell
+never buy a second VPS. If the command is interrupted before it can tell
 you the outcome, re-run it with the same --idempotency-key it printed.`,
 		Example: `  arianet vps create                                   # interactive wizard
   arianet vps create --plan 5 --region 1 --os 3 --hostname web-01
@@ -336,7 +336,7 @@ you the outcome, re-run it with the same --idempotency-key it printed.`,
 				if name == "" {
 					name = "(no hostname)"
 				}
-				if !confirm(fmt.Sprintf("\nCreate server %s with plan #%d in region #%d? Billing starts immediately", name, planID, datacenterID)) {
+				if !confirm(fmt.Sprintf("\nCreate VPS %s with plan #%d in region #%d? Billing starts immediately", name, planID, datacenterID)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -373,7 +373,7 @@ you the outcome, re-run it with the same --idempotency-key it printed.`,
 			result, err := client.CreateService(req, idempotencyKey)
 			if err != nil {
 				if outcomeUnknown(err) {
-					fmt.Fprintf(os.Stderr, "\nThe outcome of the order is unknown. Re-run the same command with\n  --idempotency-key %s\nto find out safely: it returns the server if it was created, and never creates a second one.\n", idempotencyKey)
+					fmt.Fprintf(os.Stderr, "\nThe outcome of the order is unknown. Re-run the same command with\n  --idempotency-key %s\nto find out safely: it returns the VPS if it was created, and never creates a second one.\n", idempotencyKey)
 				}
 				handleAPIError(err)
 				return nil
@@ -447,13 +447,13 @@ func outcomeUnknown(err error) bool {
 
 func printCreated(s *api.CreatedService, replayed, showPassword bool) {
 	if replayed {
-		printer.Info("This is the result of an earlier order with the same idempotency key; no second server was created.")
+		printer.Info("This is the result of an earlier order with the same idempotency key; no second VPS was created.")
 	}
 	name := derefStr(s.Name)
 	if name == "" {
 		name = fmt.Sprintf("#%d", s.ID)
 	}
-	printer.Success(fmt.Sprintf("Server %s ordered (ID: %d, status: %s)", name, s.ID, s.Status))
+	printer.Success(fmt.Sprintf("VPS %s ordered (ID: %d, status: %s)", name, s.ID, s.Status))
 
 	rows := [][]string{{"ID", strconv.Itoa(s.ID)}, {"Status", s.Status}}
 	if s.Plan != nil && s.Plan.Name != nil {
@@ -487,7 +487,7 @@ func runServerCreateWizard(client *api.Client, datacenterID, planID, osID int, h
 	c := createChoice{datacenterID: datacenterID, planID: planID, osID: osID, hostname: hostname, sshKeyID: sshKeyID}
 
 	fmt.Println()
-	fmt.Println("  Arianet Server Creation Wizard")
+	fmt.Println("  Arianet VPS Creation Wizard")
 	fmt.Println("  " + strings.Repeat("-", 38))
 
 	if c.datacenterID == 0 {
@@ -651,7 +651,7 @@ func newServiceDeleteCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "delete <id>",
-		Short: "Delete a server",
+		Short: "Delete a VPS",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet vps delete 42
   arianet vps delete 42 --yes --wait`,
@@ -662,7 +662,7 @@ func newServiceDeleteCmd() *cobra.Command {
 			}
 
 			if !yes {
-				if !confirm(fmt.Sprintf("Delete server #%d? This cannot be undone", id)) {
+				if !confirm(fmt.Sprintf("Delete VPS #%d? This cannot be undone", id)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -680,7 +680,7 @@ func newServiceDeleteCmd() *cobra.Command {
 				return nil
 			}
 
-			reportAction(res, fmt.Sprintf("Server #%d deletion started.", id))
+			reportAction(res, fmt.Sprintf("VPS #%d deletion started.", id))
 			maybeWait(client, id, waitDeleted(), wait, timeout)
 			return nil
 		},
@@ -694,7 +694,7 @@ func newServiceDeleteCmd() *cobra.Command {
 func newServiceStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status <id>",
-		Short: "Get the current status of a server",
+		Short: "Get the current status of a VPS",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet vps status 42
   arianet vps status 42 --output json`,
@@ -739,8 +739,8 @@ func newServiceActionsCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "actions <id>",
-		Short: "Show the operation history of a server",
-		Long: `Show the operations performed on a server (create, restart, reinstall, ...),
+		Short: "Show the operation history of a VPS",
+		Long: `Show the operations performed on a VPS (create, restart, reinstall, ...),
 newest first, with their outcome.`,
 		Args: cobra.ExactArgs(1),
 		Example: `  arianet vps actions 42
@@ -770,7 +770,7 @@ newest first, with their outcome.`,
 			}
 
 			if len(history.Actions) == 0 {
-				printer.Info("No operations recorded for this server.")
+				printer.Info("No operations recorded for this VPS.")
 				return nil
 			}
 
@@ -796,7 +796,7 @@ func newServiceRestartCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "restart <id>",
-		Short: "Restart a server",
+		Short: "Restart a VPS",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet vps restart 42
   arianet vps restart 42 --yes --wait`,
@@ -807,7 +807,7 @@ func newServiceRestartCmd() *cobra.Command {
 			}
 
 			if !yes {
-				if !confirm(fmt.Sprintf("Restart server #%d?", id)) {
+				if !confirm(fmt.Sprintf("Restart VPS #%d?", id)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -825,7 +825,7 @@ func newServiceRestartCmd() *cobra.Command {
 				return nil
 			}
 
-			reportAction(res, fmt.Sprintf("Server #%d is restarting.", id))
+			reportAction(res, fmt.Sprintf("VPS #%d is restarting.", id))
 			maybeWait(client, id, waitRestarted(), wait, timeout)
 			return nil
 		},
@@ -844,7 +844,7 @@ func newServicePowerOnCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "power-on <id>",
-		Short:   "Power on a server",
+		Short:   "Power on a VPS",
 		Args:    cobra.ExactArgs(1),
 		Example: `  arianet vps power-on 42 --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -865,7 +865,7 @@ func newServicePowerOnCmd() *cobra.Command {
 				return nil
 			}
 
-			reportAction(res, fmt.Sprintf("Server #%d is powering on.", id))
+			reportAction(res, fmt.Sprintf("VPS #%d is powering on.", id))
 			maybeWait(client, id, waitPoweredOn(), wait, timeout)
 			return nil
 		},
@@ -884,7 +884,7 @@ func newServicePowerOffCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "power-off <id>",
-		Short:   "Power off a server",
+		Short:   "Power off a VPS",
 		Args:    cobra.ExactArgs(1),
 		Example: `  arianet vps power-off 42 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -894,7 +894,7 @@ func newServicePowerOffCmd() *cobra.Command {
 			}
 
 			if !yes {
-				if !confirm(fmt.Sprintf("Power off server #%d?", id)) {
+				if !confirm(fmt.Sprintf("Power off VPS #%d?", id)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -912,7 +912,7 @@ func newServicePowerOffCmd() *cobra.Command {
 				return nil
 			}
 
-			reportAction(res, fmt.Sprintf("Server #%d is powering off.", id))
+			reportAction(res, fmt.Sprintf("VPS #%d is powering off.", id))
 			maybeWait(client, id, waitPoweredOff(), wait, timeout)
 			return nil
 		},
@@ -928,7 +928,7 @@ func newServiceRenameCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "rename <id>",
-		Short:   "Rename a server",
+		Short:   "Rename a VPS",
 		Args:    cobra.ExactArgs(1),
 		Example: `  arianet vps rename 42 --name new-hostname`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -952,7 +952,7 @@ func newServiceRenameCmd() *cobra.Command {
 				return nil
 			}
 
-			reportAction(res, fmt.Sprintf("Server #%d renamed to %q.", id, name))
+			reportAction(res, fmt.Sprintf("VPS #%d renamed to %q.", id, name))
 			return nil
 		},
 	}
@@ -972,7 +972,7 @@ func newServiceReinstallCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "reinstall <id>",
-		Short: "Reinstall the OS on a server",
+		Short: "Reinstall the OS on a VPS",
 		Args:  cobra.ExactArgs(1),
 		Example: `  arianet vps reinstall 42 --os 3
   arianet vps reinstall 42 --os 3 --yes --wait`,
@@ -983,8 +983,8 @@ func newServiceReinstallCmd() *cobra.Command {
 			}
 
 			if !yes {
-				printer.Warn("Reinstalling erases all data on the server.")
-				if !confirm(fmt.Sprintf("Reinstall the OS on server #%d?", id)) {
+				printer.Warn("Reinstalling erases all data on the VPS.")
+				if !confirm(fmt.Sprintf("Reinstall the OS on VPS #%d?", id)) {
 					printer.Info("Cancelled.")
 					return nil
 				}
@@ -1002,7 +1002,7 @@ func newServiceReinstallCmd() *cobra.Command {
 				return nil
 			}
 
-			reportAction(res, fmt.Sprintf("Server #%d reinstall started.", id))
+			reportAction(res, fmt.Sprintf("VPS #%d reinstall started.", id))
 			maybeWait(client, id, waitReinstalled(), wait, timeout)
 			return nil
 		},
@@ -1062,7 +1062,7 @@ scripts). With neither, the current state is flipped.`,
 			if res.Protected != nil {
 				state = map[bool]string{true: "enabled", false: "disabled"}[*res.Protected]
 			}
-			reportAction(res, fmt.Sprintf("Server #%d deletion protection %s.", id, state))
+			reportAction(res, fmt.Sprintf("VPS #%d deletion protection %s.", id, state))
 			return nil
 		},
 	}

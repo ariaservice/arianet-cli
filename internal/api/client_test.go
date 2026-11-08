@@ -255,3 +255,39 @@ func TestOversizedResponseIsBounded(t *testing.T) {
 		t.Fatal("expected an error for an oversized/invalid body")
 	}
 }
+
+// samandari: both addresses are primary and the IPv6 one comes first; the IPv4
+// column must still get the IPv4 address (arianet-infra-tasks#443).
+func TestIPFamiliesFallBackToIPAddresses(t *testing.T) {
+	s := Service{IPAddresses: []IPAddressSummary{
+		{IP: "2a01:f900:11:226::1", Type: "primary"},
+		{IP: "206.1.100.127", Type: "primary"},
+	}}
+	if got := s.IPv4Address(); got != "206.1.100.127" {
+		t.Errorf("IPv4Address = %q", got)
+	}
+	if got := s.IPv6Address(); got != "2a01:f900:11:226::1" {
+		t.Errorf("IPv6Address = %q", got)
+	}
+	if got := s.PrimaryIP(); got != "206.1.100.127" {
+		t.Errorf("PrimaryIP = %q, want the IPv4 address", got)
+	}
+
+	onlyV6 := Service{IPAddresses: []IPAddressSummary{{IP: "2001:db8::5", Type: "secondary"}}}
+	if onlyV6.IPv4Address() != "" || onlyV6.IPv6Address() != "2001:db8::5" || onlyV6.PrimaryIP() != "2001:db8::5" {
+		t.Errorf("v6-only server: v4 %q v6 %q primary %q", onlyV6.IPv4Address(), onlyV6.IPv6Address(), onlyV6.PrimaryIP())
+	}
+}
+
+func TestIPFamiliesPreferTheAPIFields(t *testing.T) {
+	v4, v6 := "198.51.100.7", "2001:db8::7"
+	s := Service{IPv4: &v4, IPv6: &v6, IPAddresses: []IPAddressSummary{{IP: "198.51.100.9", Type: "primary"}}}
+	if s.IPv4Address() != v4 || s.IPv6Address() != v6 {
+		t.Errorf("got v4 %q v6 %q", s.IPv4Address(), s.IPv6Address())
+	}
+	empty := ""
+	s = Service{IPv4: &empty, IPAddresses: []IPAddressSummary{{IP: "198.51.100.9", Type: "secondary"}}}
+	if s.IPv4Address() != "198.51.100.9" {
+		t.Errorf("empty ipv4 field should fall back, got %q", s.IPv4Address())
+	}
+}

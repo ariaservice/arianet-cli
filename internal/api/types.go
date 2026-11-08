@@ -1,6 +1,10 @@
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"net"
+	"strings"
+)
 
 // ─── Response envelope ───────────────────────────────────────────────────────
 
@@ -195,6 +199,8 @@ type Service struct {
 	Protected      *bool              `json:"protected"`
 	Cycle          *string            `json:"cycle"`
 	IPAddresses    []IPAddressSummary `json:"ip_addresses"`
+	IPv4           *string            `json:"ipv4,omitempty"` // primary IPv4 (API 2026-11+)
+	IPv6           *string            `json:"ipv6,omitempty"` // primary IPv6 (API 2026-11+)
 	Plan           *PlanRef           `json:"plan,omitempty"`
 	Datacenter     *DatacenterRef     `json:"datacenter,omitempty"`
 	OS             *OSRef             `json:"os,omitempty"`
@@ -206,16 +212,48 @@ type IPAddressSummary struct {
 	Type string `json:"type"`
 }
 
+// PrimaryIP is the address to connect to: the IPv4 one when the server has
+// it, else the IPv6 one.
 func (s *Service) PrimaryIP() string {
-	for _, ip := range s.IPAddresses {
+	if ip := s.IPv4Address(); ip != "" {
+		return ip
+	}
+	return s.IPv6Address()
+}
+
+// IPv4Address is the server's primary IPv4 address, or "" when it has none.
+func (s *Service) IPv4Address() string { return addressOfFamily(s.IPv4, s.IPAddresses, false) }
+
+// IPv6Address is the server's primary IPv6 address, or "" when it has none.
+func (s *Service) IPv6Address() string { return addressOfFamily(s.IPv6, s.IPAddresses, true) }
+
+// addressOfFamily takes the API's own ipv4/ipv6 field when present; an older
+// API only sends ip_addresses, so the address is picked from there: the
+// primary one of that family, else the first of that family.
+func addressOfFamily(explicit *string, ips []IPAddressSummary, v6 bool) string {
+	if explicit != nil && strings.TrimSpace(*explicit) != "" {
+		return strings.TrimSpace(*explicit)
+	}
+	first := ""
+	for _, ip := range ips {
+		if isIPv6(ip.IP) != v6 {
+			continue
+		}
 		if ip.Type == "primary" {
 			return ip.IP
 		}
+		if first == "" {
+			first = ip.IP
+		}
 	}
-	if len(s.IPAddresses) > 0 {
-		return s.IPAddresses[0].IP
-	}
-	return ""
+	return first
+}
+
+// isIPv6 is false for an IPv4 address and for anything that does not parse,
+// so an unexpected value still shows up in the IPv4 column.
+func isIPv6(addr string) bool {
+	ip := net.ParseIP(strings.TrimSpace(addr))
+	return ip != nil && ip.To4() == nil
 }
 
 type ServiceStatus struct {

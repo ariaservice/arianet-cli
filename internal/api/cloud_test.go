@@ -259,3 +259,52 @@ func TestGetAction(t *testing.T) {
 		t.Errorf("action = %+v", a)
 	}
 }
+
+// #421: cloud-service itself answers 429 as {"error","code":"rate_limit_exceeded"}
+// with RateLimit-Limit/Remaining/Reset (seconds) and Retry-After.
+func TestCloudServiceRateLimitShape(t *testing.T) {
+	slept := stubRateLimitSleep(t)
+	var calls int32
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		if r.Method == http.MethodGet && n > 2 {
+			writeJSON(w, 200, map[string]any{"data": []any{}})
+			return
+		}
+		w.Header().Set("RateLimit-Limit", "120")
+		w.Header().Set("RateLimit-Remaining", "0")
+		w.Header().Set("RateLimit-Reset", "7")
+		w.Header().Set("Retry-After", "7")
+		writeJSON(w, 429, map[string]any{"error": "Too many requests. Try again shortly.", "code": "rate_limit_exceeded"})
+	})
+
+	err := c.Cloud().Post("/servers/1/actions/reboot", nil, nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != 429 || apiErr.Code != "rate_limit_exceeded" ||
+		apiErr.RetryAfter != 7 || apiErr.Message != "Too many requests. Try again shortly." {
+		t.Fatalf("err = %#v", err)
+	}
+	if calls != 1 || len(*slept) != 0 {
+		t.Errorf("a write must not be retried: calls=%d slept=%v", calls, *slept)
+	}
+
+	if err := c.Cloud().Get("/servers", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 || len(*slept) != 1 || (*slept)[0] != 7*time.Second {
+		t.Errorf("a read waits Retry-After once: calls=%d slept=%v", calls, *slept)
+	}
+}
+
+func TestPublicClientSendsNoCredential(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.Header["Authorization"]; ok {
+			t.Errorf("a tokenless client sent Authorization %q", r.Header.Get("Authorization"))
+		}
+		writeJSON(w, 200, map[string]any{"pricing": map[string]any{}})
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, "").Cloud().Get("/public/pricing", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}

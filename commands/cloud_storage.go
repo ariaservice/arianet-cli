@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ariaservice/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/config"
 	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
@@ -269,10 +270,135 @@ func showGeneric(raw []json.RawMessage, preferred []string) {
 	genericTable(p, items, preferred)
 }
 
+// newCloudPricingCmd prints the public price list, GET /public/pricing,
+// which needs no token. --account shows the account's own price rows
+// (GET /pricing, token required).
 func newCloudPricingCmd() *cobra.Command {
-	return catalogCmd("pricing", "Show cloud prices (servers, volumes, IPs, backups...)", "/pricing",
-		"  arianet cloud pricing\n  arianet cloud pricing --datacenter eu-central-1 -o json",
-		[]string{"datacenter", "sku", "unit", "hourly_price", "monthly_price", "percent", "currency"}, "prices")
+	var (
+		datacenter string
+		account    bool
+	)
+	cmd := &cobra.Command{
+		Use:     "pricing",
+		Aliases: []string{"prices"},
+		Short:   "Show the public price list (no token needed)",
+		Long: `Show every server type per location and every other price on sale (IPs,
+volumes, snapshots, backups, load balancers, NAT gateways), VAT excluded.
+No API token is needed. --account shows your account's own price rows instead.`,
+		Example: `  arianet cloud pricing
+  arianet cloud pricing --datacenter ovh
+  arianet cloud pricing -o json
+  arianet cloud pricing --account`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if account {
+				q := url.Values{}
+				if datacenter != "" {
+					q.Set("datacenter", datacenter)
+				}
+				raw, ok := dataList("/pricing", q)
+				if !ok {
+					return nil
+				}
+				showGeneric(raw, []string{"datacenter", "sku", "unit", "hourly_price", "monthly_price", "percent", "currency"})
+				return nil
+			}
+			cc, err := publicCloud()
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+			var raw json.RawMessage
+			if err := cc.Get("/public/pricing", nil, &raw); err != nil {
+				handleAPIError(err)
+				return nil
+			}
+			if jsonMode() {
+				printRawJSON(raw)
+				return nil
+			}
+			resp, err := decodeObject(raw)
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+			pricing, _ := resp["pricing"].(map[string]any)
+			if pricing == nil {
+				printRawJSON(raw)
+				return nil
+			}
+			printPublicPricing(printer.New(cfg.Output), pricing, datacenter)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&datacenter, "datacenter", "", "only this datacenter (location code)")
+	cmd.Flags().StringVar(&datacenter, "location", "", "alias of --datacenter")
+	cmd.Flags().BoolVar(&account, "account", false, "your account's price rows (GET /pricing; needs a token)")
+	return cmd
+}
+
+// publicCloud is a cloud client that sends no credential, for public
+// endpoints. It refuses the same API URLs requireAuth refuses.
+func publicCloud() (*api.CloudClient, error) {
+	apiURL := config.DefaultAPIURL
+	if cfg != nil && cfg.APIURL != "" {
+		apiURL = cfg.APIURL
+	}
+	if err := config.ValidateAPIURL(apiURL); err != nil {
+		return nil, err
+	}
+	return api.New(apiURL, "").Cloud(), nil
+}
+
+func printPublicPricing(p *printer.Printer, pricing map[string]any, location string) {
+	var serverRows [][]string
+	types, _ := pricing["server_types"].([]any)
+	for _, t := range types {
+		st, ok := t.(map[string]any)
+		if !ok {
+			continue
+		}
+		prices, _ := st["prices"].([]any)
+		for _, pr := range prices {
+			lp, ok := pr.(map[string]any)
+			if !ok || (location != "" && cell(lp["location"]) != location) {
+				continue
+			}
+			serverRows = append(serverRows, []string{
+				cell(st["id"]), cell(st["name"]), cell(lp["location"]), cell(st["cores"]), cell(st["memory_mb"]),
+				cell(st["disk_gb"]), cell(st["included_traffic_gb"]), cell(lookup(lp, "price_hourly.net")),
+				cell(lookup(lp, "price_monthly.net")), cell(lookup(lp, "price_monthly.currency")),
+			})
+		}
+	}
+	if len(serverRows) > 0 {
+		p.TableAdvanced("Server types", []string{"ID", "Name", "Location", "Cores", "Memory (MB)", "Disk (GB)", "Traffic (GB)", "Hourly", "Monthly", "Currency"}, serverRows)
+	}
+
+	var resourceRows [][]string
+	resources, _ := pricing["resources"].([]any)
+	for _, r := range resources {
+		rp, ok := r.(map[string]any)
+		if !ok || (location != "" && cell(rp["location"]) != location) {
+			continue
+		}
+		resourceRows = append(resourceRows, []string{
+			cell(rp["sku"]), cell(rp["location"]), cell(rp["unit"]), cell(lookup(rp, "price_hourly.net")),
+			cell(lookup(rp, "price_monthly.net")), cell(rp["percent"]), cell(lookup(rp, "price_monthly.currency")),
+		})
+	}
+	if len(resourceRows) > 0 {
+		p.TableAdvanced("Other resources", []string{"SKU", "Location", "Unit", "Hourly", "Monthly", "Percent", "Currency"}, resourceRows)
+	}
+	if len(serverRows) == 0 && len(resourceRows) == 0 {
+		printer.Info("No prices found.")
+		return
+	}
+	note := "Prices exclude VAT."
+	if h := cell(pricing["hours_per_month"]); h != "-" {
+		note += " Monthly prices are quoted over " + h + " hours."
+	}
+	printer.Info(note)
 }
 
 func newCloudPlansCmd() *cobra.Command {

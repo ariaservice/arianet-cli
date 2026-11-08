@@ -74,6 +74,29 @@ cosign verify-blob \
 
 Each release also ships an SBOM (`*.sbom.json`) for every archive.
 
+### Upgrading
+
+```bash
+arianet upgrade            # alias: arianet update
+arianet upgrade --check    # only report; exit 0 = up to date, 2 = newer release available, 1 = check failed
+arianet upgrade --yes      # no confirmation prompt (needed when not in a terminal)
+arianet upgrade --version v0.4.0 --allow-downgrade   # a specific release (standalone/rpm installs)
+```
+
+`arianet upgrade` upgrades the way you installed:
+
+| Installed with | What `arianet upgrade` does |
+|---|---|
+| Homebrew (macOS, Linuxbrew) | runs `brew upgrade ariaservice/arianet/arianet` |
+| apt | runs `sudo apt-get update && sudo apt-get install --only-upgrade -y arianet` in a terminal; otherwise prints that command and exits 1 |
+| .rpm | downloads the release `.rpm`, verifies it, runs `sudo rpm -U` (prints the command when not in a terminal) |
+| install script, manual download, Windows `.exe` | downloads the release archive for your OS/architecture, verifies its SHA-256 against `checksums.txt` (and the Sigstore signature when `cosign` is installed), checks that the new binary runs, then swaps it in atomically |
+
+The swap writes the new binary next to the old one and renames it into place, so a failed
+upgrade leaves the old binary untouched. On Windows the running `arianet.exe` is moved
+aside to `arianet.exe.old` (removed on the next run). If the binary's directory is not
+writable, re-run with `sudo arianet upgrade` (Windows: a terminal opened as Administrator).
+
 ### Build from source
 
 ```bash
@@ -148,9 +171,8 @@ You can also use environment variables:
 | `ARIANET_API_URL` | Override the API base URL (default `https://api.ariaservice.net`) |
 | `ARIANET_NO_UPDATE_NOTIFIER` | Set to any value to turn off the new-release notice |
 
-When a newer release is published, `arianet` prints a short notice with the upgrade
-command for your install method (Homebrew, apt or the install script) to stderr after a
-command. It checks GitHub at most once a day in the background, never delays or fails a
+When a newer release is published, `arianet` prints a short notice suggesting
+`arianet upgrade` to stderr after a command. It checks GitHub at most once a day in the background, never delays or fails a
 command, and stays quiet with `-o json`, when stderr is not a terminal, when `CI` is set,
 or when `ARIANET_NO_UPDATE_NOTIFIER` is set.
 

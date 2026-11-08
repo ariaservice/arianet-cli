@@ -387,9 +387,15 @@ type Background struct {
 	done    chan *Release
 }
 
-// Start begins a lookup that gives up after CheckTimeout.
+// Start begins a lookup that gives up after CheckTimeout. A fresh cache entry
+// is a small local file and is read right away, so a fast command still sees
+// it; only a stale or missing cache goes to the network in the background.
 func Start(c *Checker, current string) *Background {
 	b := &Background{current: current, done: make(chan *Release, 1)}
+	if cached, err := c.readCache(); err == nil && Fresh(cached, c.now()) {
+		b.done <- cached
+		return b
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), CheckTimeout)
 		defer cancel()

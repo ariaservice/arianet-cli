@@ -41,6 +41,7 @@
         X86         = '\u0648\u06cc\u0646\u062f\u0648\u0632 \u06f3\u06f2 \u0628\u06cc\u062a\u06cc \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u0646\u0645\u06cc\u200c\u0634\u0648\u062f'
         BadChecksum = '\u0641\u0627\u06cc\u0644 \u062f\u0627\u0646\u0644\u0648\u062f\u0634\u062f\u0647 \u0628\u0627 checksums.txt \u06cc\u06a9\u0633\u0627\u0646 \u0646\u06cc\u0633\u062a\u061b \u0646\u0635\u0628 \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f'
         Network     = '\u062f\u0627\u0646\u0644\u0648\u062f \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062f\u061b \u0627\u062a\u0635\u0627\u0644 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f'
+        NotFound    = '\u0646\u0633\u062e\u0647 \u06cc\u0627 \u0641\u0627\u06cc\u0644 \u0645\u0648\u0631\u062f\u0646\u0638\u0631 \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f\u061b \u0645\u0642\u062f\u0627\u0631 ARIANET_VERSION \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f'
     }
     foreach ($key in @($Fa.Keys)) { $Fa[$key] = [regex]::Unescape($Fa[$key]) }
 
@@ -59,6 +60,18 @@
         try {
             Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -Headers @{ 'User-Agent' = 'arianet-install-ps1' }
         } catch {
+            # A 404 means the release or the asset does not exist (usually a wrong
+            # ARIANET_VERSION), not a network problem. 5.1 throws WebException, 7 throws
+            # HttpResponseException; both carry .Response.StatusCode.
+            $status = 0
+            $response = $null
+            if ($_.Exception.PSObject.Properties['Response']) { $response = $_.Exception.Response }
+            if ($response -and $response.PSObject.Properties['StatusCode']) {
+                try { $status = [int]$response.StatusCode } catch { $status = 0 }
+            }
+            if ($status -eq 404) {
+                Fail "not found: $Url (no release v$version, or it has no $([IO.Path]::GetFileName($OutFile)); check ARIANET_VERSION)" $Fa.NotFound
+            }
             Fail "could not download ${Url}: $($_.Exception.Message)" $Fa.Network
         }
     }

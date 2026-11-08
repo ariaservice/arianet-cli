@@ -82,7 +82,9 @@ jobs:
         run: |
           $env:ARIANET_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'arianet-bad'
           $env:ARIANET_VERSION = '0.0.0'
-          Invoke-Expression (Get-Content -Raw scripts/install.ps1) 2>$null
+          $out = Invoke-Expression (Get-Content -Raw scripts/install.ps1) 2>$null 6>&1 | Out-String
+          $out
           if ($LASTEXITCODE -ne 1) { throw "expected exit 1, got $LASTEXITCODE" }
+          if ($out -notmatch 'not found: ') { throw 'expected a not-found error for a missing release' }
           if (Test-Path (Join-Path $env:ARIANET_INSTALL_DIR 'arianet.exe')) { throw 'half-installed arianet.exe left behind' }
           $global:LASTEXITCODE = 0

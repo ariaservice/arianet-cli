@@ -2,7 +2,7 @@
 
 The official command-line client for the [Ariaservice / Arianet](https://ariaservice.net) cloud
 platform. It talks to the public REST API at `https://api.ariaservice.net` and lets you manage your
-own VPS servers, Arianet Cloud resources, SSH keys, firewalls, invoices and account balance from a
+own VPS, Arianet Cloud resources, SSH keys, firewalls, invoices and account balance from a
 terminal or a script.
 
 It is a single static binary, MIT licensed, and the source in this repository is everything that
@@ -123,7 +123,7 @@ and end up in shell history.
 arianet auth whoami
 ```
 
-**3. List your VPS servers:**
+**3. List your VPS:**
 
 ```bash
 arianet vps list
@@ -203,12 +203,12 @@ arianet vps toggle-protection <id> [--enable | --disable]
 - Without `--plan`, `--region` or `--os` an interactive wizard asks for them.
 - With neither `--ssh-key` nor `--password`, a strong random root password is
   generated and printed **once** - save it.
-- The command waits until the server is active (up to `--timeout`, default 15m).
+- The command waits until the VPS is active (up to `--timeout`, default 15m).
   `--no-wait` returns as soon as the order is accepted.
 - Every order carries an idempotency key, so a retry after a network failure
-  cannot buy a second server. If the command is interrupted before it can tell
+  cannot buy a second VPS. If the command is interrupted before it can tell
   you the outcome, re-run it with the `--idempotency-key` it printed; the API
-  replays the original result. The server creation rate is limited, and the
+  replays the original result. The VPS creation rate is limited, and the
   CLI reports how long to wait when the limit is hit.
 
 Restart, power, reinstall and delete return as soon as the platform has

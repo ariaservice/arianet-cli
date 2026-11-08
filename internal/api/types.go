@@ -14,6 +14,8 @@ type Response struct {
 type APIError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Reason refines Code on some cloud API refusals (e.g. identity_hold).
+	Reason string `json:"reason,omitempty"`
 
 	// Filled in by the client, not part of the wire format.
 	Status     int `json:"-"`

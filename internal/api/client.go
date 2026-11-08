@@ -125,35 +125,13 @@ func (e *transportError) Error() string { return "request failed: " + e.err.Erro
 func (e *transportError) Unwrap() error { return e.err }
 
 func (c *Client) attempt(method, path string, payload []byte, out interface{}, opt reqOptions) (meta, error) {
-	var bodyReader io.Reader
-	if payload != nil {
-		bodyReader = bytes.NewReader(payload)
-	}
-
-	req, err := http.NewRequest(method, c.baseURL+"/api/v1"+path, bodyReader)
-	if err != nil {
-		return meta{}, fmt.Errorf("build request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "arianet-cli/"+version.Version)
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	headers := map[string]string{}
 	if opt.idempotencyKey != "" {
-		req.Header.Set("Idempotency-Key", opt.idempotencyKey)
+		headers["Idempotency-Key"] = opt.idempotencyKey
 	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, raw, err := c.send(method, c.baseURL+"/api/v1"+path, payload, headers)
 	if err != nil {
-		return meta{}, &transportError{err}
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return meta{}, &transportError{err}
+		return meta{}, err
 	}
 
 	m := meta{
@@ -190,6 +168,43 @@ func (c *Client) attempt(method, path string, payload []byte, out interface{}, o
 
 	m.pagination = envelope.Pagination
 	return m, nil
+}
+
+// send performs one HTTP exchange with the token, the CLI's User-Agent and
+// the bounded body read every caller of the API shares. The redirect policy
+// of the underlying client keeps the token on its host.
+func (c *Client) send(method, fullURL string, payload []byte, headers map[string]string) (*http.Response, []byte, error) {
+	var bodyReader io.Reader
+	if payload != nil {
+		bodyReader = bytes.NewReader(payload)
+	}
+
+	req, err := http.NewRequest(method, fullURL, bodyReader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "arianet-cli/"+version.Version)
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, nil, &transportError{err}
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, nil, &transportError{err}
+	}
+	return resp, raw, nil
 }
 
 func retryAfter(resp *http.Response) int {

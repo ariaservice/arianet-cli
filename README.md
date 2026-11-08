@@ -2,7 +2,8 @@
 
 The official command-line client for the [Ariaservice / Arianet](https://ariaservice.net) cloud
 platform. It talks to the public REST API at `https://api.ariaservice.net` and lets you manage your
-own servers, SSH keys, firewalls, invoices and account balance from a terminal or a script.
+own servers, Arianet Cloud resources, SSH keys, firewalls, invoices and account balance from a
+terminal or a script.
 
 It is a single static binary, MIT licensed, and the source in this repository is everything that
 ships. See [What it does and does not do](#what-it-does-and-does-not-do) before installing.
@@ -242,6 +243,86 @@ arianet firewall detach <id> --server 42
 
 `--remote-ip` is required on purpose: pass `0.0.0.0/0` to allow everyone.
 `--port` is required for `tcp` and `udp`.
+
+### Arianet Cloud
+
+`arianet cloud` manages Arianet Cloud resources through the cloud API at
+`<api-url>/cloud/v1` (default `https://api.ariaservice.net/cloud/v1`), with the
+same token. The token needs the scopes **`cloud:servers:read`** for reads and
+**`cloud:servers:write`** for changes.
+
+```bash
+arianet cloud datacenters                      # Locations (the --datacenter codes)
+arianet cloud plans [--datacenter <code>]      # Server types (the --plan IDs)
+arianet cloud images list [--type system|app|snapshot|backup] [--datacenter <code>]
+arianet cloud images get <id|image>
+arianet cloud pricing [--datacenter <code>]
+arianet cloud limits [--datacenter <code>]
+
+arianet cloud servers list [--label-selector env=prod] [--page 1 --per-page 50]
+arianet cloud servers get <id>
+arianet cloud servers create --name web-1 --datacenter <code> --plan <id> --image ubuntu-24.04 \
+    [--ssh-key-id 5] [--labels env=prod] [--firewall 2] [--network 4] [--no-ipv6] \
+    [--count 3] [--backups] [--user-data-file cloud-init.yaml] [--project-id 2] [--wait]
+arianet cloud servers update <id> [--name n] [--labels k=v | --clear-labels] [--protection-delete=true]
+arianet cloud servers delete <id> [--keep-backups=false] [--delete-snapshots] [--yes] [--wait]
+arianet cloud servers power-on|power-off|shutdown|reboot|reset <id> [--wait]
+arianet cloud servers rebuild <id> --image <image>
+arianet cloud servers change-type <id> --plan <id>          # alias: resize
+arianet cloud servers enable-rescue|disable-rescue|reset-password <id>
+arianet cloud servers change-ipv4 <id> [--confirm-paid]
+arianet cloud servers attach-network <id> --network <id> [--ip 10.0.1.5]
+arianet cloud servers detach-network <id> --network <id>
+arianet cloud servers enable-backup <id> [--window-hour 3] | disable-backup <id>
+arianet cloud servers create-backup <id> | restore-backup <id> --backup <id>
+arianet cloud servers create-image <id> --name before-upgrade
+arianet cloud servers actions <id>
+
+arianet cloud volumes list|get|create|update|delete
+arianet cloud volumes attach <id> --server <id> | detach <id> | resize <id> --size 100
+
+arianet cloud networks list|get|create|update|delete
+arianet cloud networks subnets add <id> --ip-range 10.0.2.0/24 | subnets delete <id> <subnet-id>
+arianet cloud networks routes set <id> --route 10.100.0.0/16=10.0.1.5 | --clear
+
+arianet cloud firewalls list|get|update|delete
+arianet cloud firewalls create --name web --rule direction=in,protocol=tcp,port=443,source=0.0.0.0/0,source=::/0
+arianet cloud firewalls rules set <id> --rules-file rules.json | --rule ... | --clear
+arianet cloud firewalls apply-to <id> --server 12 --label-selector "env=prod,tier!=db"
+arianet cloud firewalls remove-from <id> --label-selector env=prod
+arianet cloud firewalls set-servers <id> --server 12,13 | --none
+
+arianet cloud floating-ips list|get|create|update|delete
+arianet cloud floating-ips assign <id> --server <id> | unassign <id>
+arianet cloud floating-ips dns-ptr <id> --ptr host.example.com | --reset
+
+arianet cloud load-balancers list|get|create|update|delete|types|health
+arianet cloud load-balancers create --name web --datacenter <code> --type lb11 --service tcp:443 --target label_selector:role=web
+arianet cloud load-balancers add-service|update-service|delete-service|set-services <id> ...
+arianet cloud load-balancers add-target <id> --server <id> | --ip <ip> | --label-selector <sel>
+arianet cloud load-balancers remove-target <id> --target-id <id>
+arianet cloud load-balancers change-type|change-algorithm|attach-network|detach-network <id> ...
+
+arianet cloud placement-groups list|get|create|update|delete
+arianet cloud ssh-keys list|get|add|update|delete            # same as `arianet ssh`
+
+arianet cloud actions list [--resource-type server --resource-id 12] [--status running]
+arianet cloud actions get <id>
+arianet cloud actions wait <id> [<id>...] [--timeout 30m]
+```
+
+- Every list takes `--label-selector`: comma-separated terms that must all hold,
+  each `key=value`, `key!=value`, `key` (has the label) or `!key` (has not), and `--page`/`--per-page` (at most 100); without a page,
+  every page is fetched. `--project-id` narrows a list to one project.
+- `create` takes `--labels key=value` (repeatable) and `--project-id`.
+- Operations run asynchronously and return an action. The command prints its ID;
+  `--wait` follows it (progress on stderr) and exits non-zero if it fails or times out.
+  With `-o json` the response is printed as the API returned it, plus the final
+  `actions` after a wait.
+- A root or rescue password returned by `create`, `rebuild`, `enable-rescue`,
+  `reset-password` or `restore-backup` is printed once - save it.
+- Reads that hit the rate limit are retried once the `Retry-After` time has passed
+  (when that is at most 30 seconds); changes are never retried automatically.
 
 ### Balance & Invoices
 

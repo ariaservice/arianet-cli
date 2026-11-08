@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ariaservice/arianet-cli/internal/api"
 	"github.com/ariaservice/arianet-cli/internal/config"
@@ -30,6 +31,7 @@ Get started:
   arianet configure            Configure your API token
   arianet server list          List your cloud servers
   arianet region list          List available regions
+  arianet cloud servers list   List your Arianet Cloud servers
 
 Documentation: https://docs.ariaservice.net/cli`,
 	SilenceUsage:  true,
@@ -62,6 +64,7 @@ func init() {
 		newRegionCmd(),
 		newOSCmd(),
 		newPlanCmd(),
+		newCloudCmd(),
 		newVersionCmd(),
 	)
 }
@@ -144,7 +147,7 @@ func describeError(err error) (string, []string) {
 		return err.Error(), nil
 	}
 
-	switch apiErr.Code {
+	switch strings.ToUpper(apiErr.Code) {
 	case "UNAUTHORIZED":
 		return "Authentication failed: " + apiErr.Message, []string{
 			"Check your token with: arianet configure show",
@@ -152,6 +155,10 @@ func describeError(err error) (string, []string) {
 		}
 	case "INSUFFICIENT_SCOPE":
 		return apiErr.Message, []string{"Create a token that includes the required scope at https://cloud.ariaservice.net/users/api-tokens"}
+	case "FORBIDDEN":
+		return apiErr.Message, []string{cloudScopesHint}
+	case "IDENTITY_NEEDED":
+		return apiErr.Message, []string{"Verify your identity at https://cloud.ariaservice.net, then try again."}
 	case "IP_NOT_ALLOWED":
 		return apiErr.Message, []string{"Your token is restricted to an IP allowlist; add this machine's address to the token."}
 	case "RATE_LIMIT_EXCEEDED":

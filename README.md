@@ -87,7 +87,8 @@ go build -trimpath -o arianet ./cmd/arianet
 ## What it does and does not do
 
 - Sends HTTPS requests to **one host**, the API URL you configured (default
-  `https://api.ariaservice.net`), with your API token as a bearer token. Nothing else is contacted.
+  `https://api.ariaservice.net`), with your API token as a bearer token (public endpoints such as
+  `cloud pricing` get no token at all). Nothing else is contacted.
 - **No telemetry, no analytics, no update checks, no background processes.**
 - Does not execute other programs, does not read your SSH private keys (`ssh add` reads only the
   public key file you point it at), does not modify anything outside its own config file.
@@ -256,7 +257,8 @@ arianet cloud datacenters                      # Locations (the --datacenter cod
 arianet cloud plans [--datacenter <code>]      # Server types (the --plan IDs)
 arianet cloud images list [--type system|app|snapshot|backup] [--datacenter <code>]
 arianet cloud images get <id|image>
-arianet cloud pricing [--datacenter <code>]
+arianet cloud pricing [--datacenter <code>]      # Public price list, no token needed
+arianet cloud pricing --account                 # Your account's price rows
 arianet cloud limits [--datacenter <code>]
 
 arianet cloud servers list [--label-selector env=prod] [--page 1 --per-page 50]
@@ -265,7 +267,7 @@ arianet cloud servers create --name web-1 --datacenter <code> --plan <id> --imag
     [--ssh-key-id 5] [--labels env=prod] [--firewall 2] [--network 4] [--no-ipv6] \
     [--count 3] [--backups] [--user-data-file cloud-init.yaml] [--project-id 2] [--wait]
 arianet cloud servers update <id> [--name n] [--labels k=v | --clear-labels] [--protection-delete=true]
-arianet cloud servers delete <id> [--keep-backups=false] [--delete-snapshots] [--yes] [--wait]
+arianet cloud servers delete <id> [--reason price --note "..."] [--keep-backups] [--delete-snapshots] [--yes] [--wait]
 arianet cloud servers power-on|power-off|shutdown|reboot|reset <id> [--wait]
 arianet cloud servers rebuild <id> --image <image>
 arianet cloud servers change-type <id> --plan <id>          # alias: resize
@@ -277,6 +279,7 @@ arianet cloud servers enable-backup <id> [--window-hour 3] | disable-backup <id>
 arianet cloud servers create-backup <id> | restore-backup <id> --backup <id>
 arianet cloud servers create-image <id> --name before-upgrade
 arianet cloud servers actions <id>
+arianet cloud servers costs <id>                # Hourly/monthly cost per billed piece + totals
 
 arianet cloud volumes list|get|create|update|delete
 arianet cloud volumes attach <id> --server <id> | detach <id> | resize <id> --size 100
@@ -319,6 +322,11 @@ arianet cloud actions wait <id> [<id>...] [--timeout 30m]
   `--wait` follows it (progress on stderr) and exits non-zero if it fails or times out.
   With `-o json` the response is printed as the API returned it, plus the final
   `actions` after a wait.
+- `cloud pricing` reads the public price list (`/cloud/v1/public/pricing`) and sends
+  no token, so it works without `arianet configure`.
+- `servers delete --keep-backups` keeps the finished backups as snapshots, billed per
+  GB until deleted; `--delete-snapshots` removes the server's unprotected snapshots
+  (by default snapshots survive the server).
 - A root or rescue password returned by `create`, `rebuild`, `enable-rescue`,
   `reset-password` or `restore-backup` is printed once - save it.
 - Reads that hit the rate limit are retried once the `Retry-After` time has passed

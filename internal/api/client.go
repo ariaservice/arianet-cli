@@ -184,7 +184,10 @@ func (c *Client) send(method, fullURL string, payload []byte, headers map[string
 		return nil, nil, fmt.Errorf("build request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	// A client made without a token (public endpoints) sends no credential.
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "arianet-cli/"+version.Version)
 	if payload != nil {

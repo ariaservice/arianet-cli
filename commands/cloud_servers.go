@@ -140,6 +140,7 @@ func newCloudServersCmd() *cobra.Command {
 			}),
 		newCloudServerCreateImageCmd(),
 		newCloudServerActionsCmd(),
+		newCloudServerCostsCmd(),
 	)
 	return cmd
 }
@@ -291,7 +292,7 @@ func newCloudServerDeleteCmd() *cobra.Command {
 		Short:   "Delete a server",
 		Example: `  arianet cloud servers delete 12
   arianet cloud servers delete 12 --yes --wait
-  arianet cloud servers delete 12 --keep-backups=false --delete-snapshots`,
+  arianet cloud servers delete 12 --reason price --keep-backups --delete-snapshots`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseCloudID(args[0], "server")
@@ -309,19 +310,15 @@ func newCloudServerDeleteCmd() *cobra.Command {
 			if note != "" {
 				q.Set("note", note)
 			}
-			var body map[string]any
-			if cmd.Flags().Changed("keep-backups") || cmd.Flags().Changed("delete-snapshots") {
-				body = map[string]any{}
-				changedBool(cmd, body, "keep-backups", "keep_backups")
-				changedBool(cmd, body, "delete-snapshots", "delete_snapshots")
+			if keepBackups {
+				q.Set("keep_backups", "true")
+			}
+			if deleteSnapshots {
+				q.Set("delete_snapshots", "true")
 			}
 			cc := requireCloud()
 			var raw json.RawMessage
-			var payload any
-			if body != nil {
-				payload = body
-			}
-			if err := cc.Delete(cloudServer.itemPath(id), q, payload, &raw); err != nil {
+			if err := cc.Delete(cloudServer.itemPath(id), q, nil, &raw); err != nil {
 				handleAPIError(err)
 				return nil
 			}
@@ -330,10 +327,10 @@ func newCloudServerDeleteCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
-	cmd.Flags().StringVar(&reason, "reason", "", "why it is deleted (optional feedback)")
-	cmd.Flags().StringVar(&note, "note", "", "free-text note with the reason")
-	cmd.Flags().BoolVar(&keepBackups, "keep-backups", false, "keep the server's backups after deletion")
-	cmd.Flags().BoolVar(&deleteSnapshots, "delete-snapshots", false, "also delete the server's snapshots")
+	cmd.Flags().StringVar(&reason, "reason", "", "why: price, performance, ip_filtered, no_longer_needed, migrating, support or other")
+	cmd.Flags().StringVar(&note, "note", "", "a few words why (required with --reason other)")
+	cmd.Flags().BoolVar(&keepBackups, "keep-backups", false, "keep its finished backups as snapshots (billed per GB until deleted)")
+	cmd.Flags().BoolVar(&deleteSnapshots, "delete-snapshots", false, "also delete its snapshots (protected ones stay)")
 	w.add(cmd)
 	return cmd
 }
@@ -380,5 +377,67 @@ func newCloudServerActionsCmd() *cobra.Command {
 			showActions(out.Data)
 			return nil
 		},
+	}
+}
+
+func newCloudServerCostsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "costs <id>",
+		Short: "Show what a server costs per hour and month, piece by piece",
+		Long: `Show a server's current hourly and monthly rate per billed piece (plan,
+primary IPv4, floating and elastic IPs, attached volumes, backup add-on), the
+totals, and what its snapshots and kept backups would cost after a delete.`,
+		Example: "  arianet cloud servers costs 12\n  arianet cloud servers costs 12 -o json",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseCloudID(args[0], "server")
+			if err != nil {
+				return err
+			}
+			cc := requireCloud()
+			var raw json.RawMessage
+			if err := cc.Get(cloudServer.itemPath(id)+"/costs", nil, &raw); err != nil {
+				handleAPIError(err)
+				return nil
+			}
+			resp, err := decodeObject(raw)
+			if err != nil {
+				handleAPIError(err)
+				return nil
+			}
+			data, _ := resp["data"].(map[string]any)
+			p := printer.New(cfg.Output)
+			if jsonMode() || data == nil {
+				if data == nil {
+					p.PrintJSON(resp)
+				} else {
+					p.PrintJSON(data)
+				}
+				return nil
+			}
+			printServerCosts(p, data)
+			return nil
+		},
+	}
+}
+
+func printServerCosts(p *printer.Printer, data map[string]any) {
+	subtable(p, data, "lines", "Billed now", []col{
+		{"Type", "type"}, {"ID", "id"}, {"Name", "name"}, {"SKU", "sku"}, {"Quantity", "quantity"},
+		{"Unit", "unit"}, {"Hourly", "hourly_price"}, {"Monthly", "monthly_price"}, {"Currency", "currency"},
+	})
+	subtable(p, data, "totals", "Total", []col{{"Hourly", "hourly_price"}, {"Monthly", "monthly_price"}, {"Currency", "currency"}})
+
+	var rows [][]string
+	for _, k := range []struct{ key, label string }{{"snapshots", "Snapshots"}, {"kept_backups", "Kept backups"}} {
+		if m, ok := data[k.key].(map[string]any); ok {
+			rows = append(rows, []string{k.label, cell(m["count"]), cell(m["size_gb"]), cell(m["hourly_price"]), cell(m["monthly_price"]), cell(m["currency"])})
+		}
+	}
+	if len(rows) > 0 {
+		p.TableAdvanced("After a delete", []string{"Copies", "Count", "Size (GB)", "Hourly", "Monthly", "Currency"}, rows)
+	}
+	if h := cell(data["hours_per_month"]); h != "-" {
+		printer.Info("Monthly prices are quoted over " + h + " hours.")
 	}
 }

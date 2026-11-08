@@ -20,9 +20,19 @@ import (
 // cloudTestServer serves the cloud API at /cloud/v1 and points cfg at it.
 func cloudTestServer(t *testing.T, output string, h http.HandlerFunc) {
 	t.Helper()
+	cloudTestServerAs(t, output, "tok", h)
+}
+
+// cloudTestServerAs is cloudTestServer with token configured ("" for none).
+func cloudTestServerAs(t *testing.T, output, token string, h http.HandlerFunc) {
+	t.Helper()
+	wantAuth := ""
+	if token != "" {
+		wantAuth = "Bearer " + token
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer tok" {
-			t.Errorf("auth header = %q", r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != wantAuth {
+			t.Errorf("auth header = %q, want %q", r.Header.Get("Authorization"), wantAuth)
 		}
 		if !strings.HasPrefix(r.URL.Path, "/cloud/v1/") {
 			t.Errorf("path %q is outside /cloud/v1", r.URL.Path)
@@ -37,12 +47,12 @@ func cloudTestServer(t *testing.T, output string, h http.HandlerFunc) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
-	t.Setenv(config.EnvToken, "tok")
+	t.Setenv(config.EnvToken, token)
 	t.Setenv(config.EnvAPIURL, srv.URL)
 	oldCfg, oldErr := cfg, cfgErr
 	oldToken, oldURL, oldOutput := tokenOverride, apiURLOverride, outputFormat
-	tokenOverride, apiURLOverride, outputFormat = "tok", srv.URL, output
-	cfg, cfgErr = &config.Config{APIURL: srv.URL, Token: "tok", Output: output, APIURLSource: "test"}, nil
+	tokenOverride, apiURLOverride, outputFormat = token, srv.URL, output
+	cfg, cfgErr = &config.Config{APIURL: srv.URL, Token: token, Output: output, APIURLSource: "test"}, nil
 	t.Cleanup(func() {
 		cfg, cfgErr = oldCfg, oldErr
 		tokenOverride, apiURLOverride, outputFormat = oldToken, oldURL, oldOutput
@@ -233,33 +243,139 @@ func TestCloudFirewallApplyToLabelSelector(t *testing.T) {
 	}
 }
 
-func TestCloudServerDeleteSendsOptions(t *testing.T) {
+func TestCloudServerDeleteSendsOptionsAsQuery(t *testing.T) {
 	cloudTestServer(t, "json", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/cloud/v1/servers/12" || r.URL.Query().Get("reason") != "cost" {
+		q := r.URL.Query()
+		if r.Method != http.MethodDelete || r.URL.Path != "/cloud/v1/servers/12" || q.Get("reason") != "other" || q.Get("note") != "moving" {
 			t.Errorf("%s %s", r.Method, r.URL)
 		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["keep_backups"] != false || body["delete_snapshots"] != true {
-			t.Errorf("body = %v", body)
+		if q.Get("keep_backups") != "true" || q.Get("delete_snapshots") != "true" {
+			t.Errorf("query = %s", r.URL.RawQuery)
+		}
+		if b, _ := io.ReadAll(r.Body); len(b) != 0 {
+			t.Errorf("delete must not send a body: %s", b)
 		}
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]any{"action_id": 3})
 	})
-	runCaptured(t, newCloudCmd(), "servers", "delete", "12", "--yes", "--reason", "cost", "--keep-backups=false", "--delete-snapshots")
+	runCaptured(t, newCloudCmd(), "servers", "delete", "12", "--yes", "--reason", "other", "--note", "moving", "--keep-backups", "--delete-snapshots")
 }
 
-func TestCloudPricingPrintsWhateverRowsCome(t *testing.T) {
+func TestCloudServerDeleteLeavesDefaultsOut(t *testing.T) {
+	cloudTestServer(t, "json", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Has("keep_backups") || q.Has("delete_snapshots") || q.Has("reason") {
+			t.Errorf("query = %s", r.URL.RawQuery)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"action_id": 3})
+	})
+	runCaptured(t, newCloudCmd(), "servers", "delete", "12", "--yes")
+}
+
+var publicPricingBody = map[string]any{"pricing": map[string]any{
+	"vat_included": false, "hours_per_month": 730,
+	"server_types": []any{map[string]any{
+		"id": 3, "name": "CX22", "cores": 2, "memory_mb": 4096, "disk_gb": 40, "included_traffic_gb": nil,
+		"prices": []any{
+			map[string]any{"location": "ovh", "price_hourly": map[string]any{"net": 120, "currency": "IRR"}, "price_monthly": map[string]any{"net": 87600, "currency": "IRR"}},
+			map[string]any{"location": "fsn", "price_hourly": map[string]any{"net": 99, "currency": "IRR"}, "price_monthly": map[string]any{"net": 72270, "currency": "IRR"}},
+		},
+	}},
+	"resources": []any{map[string]any{
+		"sku": "volume_gb", "location": "ovh", "unit": "gb",
+		"price_hourly": map[string]any{"net": 1, "currency": "IRR"}, "price_monthly": map[string]any{"net": 730, "currency": "IRR"}, "percent": nil,
+	}},
+}}
+
+func TestCloudPricingIsPublicAndNeedsNoToken(t *testing.T) {
+	cloudTestServerAs(t, "table", "", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/cloud/v1/public/pricing" {
+			t.Errorf("path %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(publicPricingBody)
+	})
+	out := runCaptured(t, newCloudCmd(), "pricing", "--datacenter", "ovh")
+	for _, want := range []string{"Server types", "CX22", "87600", "Other resources", "volume_gb", "730", "exclude VAT", "730 hours"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pricing lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "72270") {
+		t.Errorf("--datacenter ovh still shows fsn:\n%s", out)
+	}
+}
+
+func TestCloudPricingJSONPassesThrough(t *testing.T) {
+	cloudTestServerAs(t, "json", "", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(publicPricingBody)
+	})
+	out := runCaptured(t, newCloudCmd(), "pricing")
+	var got struct {
+		Pricing struct {
+			HoursPerMonth int   `json:"hours_per_month"`
+			ServerTypes   []any `json:"server_types"`
+		} `json:"pricing"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Pricing.HoursPerMonth != 730 || len(got.Pricing.ServerTypes) != 1 {
+		t.Errorf("got %+v err %v\n%s", got, err, out)
+	}
+}
+
+func TestCloudPricingAccountUsesTheAccountRows(t *testing.T) {
 	cloudTestServer(t, "table", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/cloud/v1/pricing" {
+			t.Errorf("path %q", r.URL.Path)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{
 			map[string]any{"datacenter": "eu", "sku": "volume_gb", "monthly_price": 0.05, "currency": "EUR", "new_field": "x"},
 		}})
 	})
-	out := runCaptured(t, newCloudCmd(), "pricing")
+	out := runCaptured(t, newCloudCmd(), "pricing", "--account")
 	for _, want := range []string{"volume_gb", "0.05", "NEW FIELD", "x"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pricing lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+var serverCostsBody = map[string]any{"data": map[string]any{
+	"server_id": 12, "hours_per_month": 730,
+	"lines": []any{
+		map[string]any{"type": "server", "id": 12, "name": "web-1", "sku": "plan_3", "quantity": 1, "unit": "hour", "hourly_price": 120, "monthly_price": 87600, "currency": "IRR"},
+		map[string]any{"type": "volume", "id": 7, "name": "data", "sku": "volume_gb", "quantity": 50, "unit": "gb", "hourly_price": 50, "monthly_price": 36500, "currency": "IRR"},
+	},
+	"totals":       []any{map[string]any{"currency": "IRR", "hourly_price": 170, "monthly_price": 124100}},
+	"snapshots":    map[string]any{"count": 2, "size_gb": 12.5, "hourly_price": 3, "monthly_price": 2190, "currency": "IRR"},
+	"kept_backups": map[string]any{"count": 0, "size_gb": 0, "hourly_price": 0, "monthly_price": 0, "currency": "IRR"},
+}}
+
+func TestCloudServerCostsTable(t *testing.T) {
+	cloudTestServer(t, "table", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/cloud/v1/servers/12/costs" {
+			t.Errorf("path %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(serverCostsBody)
+	})
+	out := runCaptured(t, newCloudCmd(), "servers", "costs", "12")
+	for _, want := range []string{"Billed now", "web-1", "volume_gb", "36500", "Total", "124100", "After a delete", "Snapshots", "12.5", "730 hours"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("costs lack %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestCloudServerCostsJSON(t *testing.T) {
+	cloudTestServer(t, "json", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(serverCostsBody)
+	})
+	out := runCaptured(t, newCloudCmd(), "servers", "costs", "12")
+	var got struct {
+		ServerID int64 `json:"server_id"`
+		Lines    []any `json:"lines"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got.ServerID != 12 || len(got.Lines) != 2 {
+		t.Errorf("got %+v err %v\n%s", got, err, out)
 	}
 }
 

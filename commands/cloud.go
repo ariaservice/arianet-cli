@@ -27,7 +27,7 @@ func newCloudCmd() *cobra.Command {
 		Use:   "cloud",
 		Short: "Manage Arianet Cloud resources (servers, volumes, networks, firewalls...)",
 		Long: `Manage Arianet Cloud: servers, volumes, private networks, firewalls,
-floating IPs, load balancers, placement groups, images and actions.
+floating IPs, load balancers, images and actions.
 
 The commands call the cloud API at <api-url>/cloud/v1 with your API token.
 ` + cloudScopesHint + `
@@ -43,7 +43,6 @@ Commands that start an operation print its action; --wait follows it to the end.
 		newCloudFirewallsCmd(),
 		newCloudFloatingIPsCmd(),
 		newCloudLoadBalancersCmd(),
-		newCloudPlacementGroupsCmd(),
 		newCloudSSHKeysCmd(),
 		newCloudImagesCmd(),
 		newCloudActionsCmd(),

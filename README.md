@@ -306,7 +306,6 @@ arianet cloud load-balancers add-target <id> --server <id> | --ip <ip> | --label
 arianet cloud load-balancers remove-target <id> --target-id <id>
 arianet cloud load-balancers change-type|change-algorithm|attach-network|detach-network <id> ...
 
-arianet cloud placement-groups list|get|create|update|delete
 arianet cloud ssh-keys list|get|add|update|delete            # same as `arianet ssh`
 
 arianet cloud actions list [--resource-type server --resource-id 12] [--status running]

@@ -208,7 +208,6 @@ func newCloudServerCreateCmd() *cobra.Command {
 			f.String("user-data-file", "", "cloud-init user data file")
 			f.Bool("no-start", false, "do not start the server after creating it")
 			f.StringArray("firewall", nil, "firewall ID to apply (repeatable)")
-			f.Int64("placement-group", 0, "placement group ID")
 			f.Bool("backups", false, "turn on daily backups")
 			f.StringArray("network", nil, "private network ID to attach (repeatable)")
 			f.Bool("no-ipv4", false, "no public IPv4 address")
@@ -226,7 +225,6 @@ func newCloudServerCreateCmd() *cobra.Command {
 			changedString(cmd, body, "datacenter", "datacenter")
 			changedInt64(cmd, body, "plan", "plan_id")
 			changedString(cmd, body, "image", "image")
-			changedInt64(cmd, body, "placement-group", "placement_group_id")
 			changedBool(cmd, body, "backups", "backups")
 			changedInt(cmd, body, "count", "count")
 			if err := changedIDs(cmd, body, "ssh-key-id", "ssh_key_ids", "SSH key"); err != nil {

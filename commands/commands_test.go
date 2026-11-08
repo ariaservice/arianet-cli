@@ -272,3 +272,50 @@ func TestCheckPublicKey(t *testing.T) {
 		}
 	}
 }
+
+func TestFmtPlanCPUAndRAM(t *testing.T) {
+	cpu := []struct {
+		in   *api.ResourceValue
+		want string
+	}{
+		{nil, "-"},
+		{&api.ResourceValue{Size: 1, Unit: "vCPU"}, "1 vCPU"},
+		{&api.ResourceValue{Size: 4, Unit: "GHz"}, "4 vCPU"},
+	}
+	for _, c := range cpu {
+		if got := fmtCPU(c.in); got != c.want {
+			t.Errorf("fmtCPU(%+v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
+	ram := []struct {
+		in   *api.ResourceValue
+		want string
+	}{
+		{nil, "-"},
+		{&api.ResourceValue{Size: 512, Unit: "MB"}, "512 MB"},
+		{&api.ResourceValue{Size: 1023, Unit: "MB"}, "1023 MB"},
+		{&api.ResourceValue{Size: 1024, Unit: "MB"}, "1 GB"},
+		{&api.ResourceValue{Size: 1536, Unit: "MB"}, "1.5 GB"},
+		{&api.ResourceValue{Size: 16384, Unit: "megabyte"}, "16 GB"},
+		{&api.ResourceValue{Size: 1500, Unit: "MB"}, "1.46 GB"},
+		{&api.ResourceValue{Size: 8, Unit: "GB"}, "8 GB"},
+	}
+	for _, c := range ram {
+		if got := fmtRAM(c.in); got != c.want {
+			t.Errorf("fmtRAM(%+v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestVPSCommandKeepsServerAliases(t *testing.T) {
+	for _, name := range []string{"vps", "server", "servers", "srv"} {
+		cmd, _, err := rootCmd.Find([]string{name, "list"})
+		if err != nil {
+			t.Fatalf("%s list: %v", name, err)
+		}
+		if cmd.Name() != "list" || cmd.Parent().Name() != "vps" {
+			t.Fatalf("%s list resolved to %s %s", name, cmd.Parent().Name(), cmd.Name())
+		}
+	}
+}

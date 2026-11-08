@@ -60,7 +60,7 @@ func RenderError(p *Printer, statusCode int, message string, requestID string) {
 	case 404:
 		suggestions = append(suggestions,
 			"Check that the resource ID is correct",
-			"List available resources: arianet server list",
+			"List available resources: arianet vps list",
 		)
 	case 429:
 		suggestions = append(suggestions,

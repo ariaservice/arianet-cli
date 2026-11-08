@@ -2,7 +2,7 @@
 
 The official command-line client for the [Ariaservice / Arianet](https://ariaservice.net) cloud
 platform. It talks to the public REST API at `https://api.ariaservice.net` and lets you manage your
-own servers, Arianet Cloud resources, SSH keys, firewalls, invoices and account balance from a
+own VPS servers, Arianet Cloud resources, SSH keys, firewalls, invoices and account balance from a
 terminal or a script.
 
 It is a single static binary, MIT licensed, and the source in this repository is everything that
@@ -123,10 +123,10 @@ and end up in shell history.
 arianet auth whoami
 ```
 
-**3. List your servers:**
+**3. List your VPS servers:**
 
 ```bash
-arianet server list
+arianet vps list
 ```
 
 ---
@@ -172,30 +172,33 @@ arianet plan get <id>                   # Plan details and pricing
 arianet os list --region <id>           # OS templates available in a region
 ```
 
-### Servers
+### VPS
+
+`arianet vps` manages virtual private servers; `server`, `servers` and `srv` still work as
+aliases, so older scripts keep running.
 
 ```bash
-arianet server list [--status active] [--page 2 --limit 20]
-arianet server get <id>
-arianet server status <id>
-arianet server actions <id> [--limit 50]     # History of operations and their outcome
+arianet vps list [--status active] [--page 2 --limit 20]
+arianet vps get <id>
+arianet vps status <id>
+arianet vps actions <id> [--limit 50]     # History of operations and their outcome
 
-arianet server create                        # Interactive wizard
-arianet server create --plan 5 --region 1 --os 3 --hostname web-01
-arianet server create --plan 5 --region 1 --os 3 --ssh-key 2     # Log in with an SSH key
-arianet server create --plan 5 --region 1 --os 3 --password '...' # Choose the root password
-arianet server create --plan 5 --region 1 --os 3 --no-wait --yes --output json
+arianet vps create                        # Interactive wizard
+arianet vps create --plan 5 --region 1 --os 3 --hostname web-01
+arianet vps create --plan 5 --region 1 --os 3 --ssh-key 2     # Log in with an SSH key
+arianet vps create --plan 5 --region 1 --os 3 --password '...' # Choose the root password
+arianet vps create --plan 5 --region 1 --os 3 --no-wait --yes --output json
 
-arianet server restart <id>   [--wait] [--timeout 15m]
-arianet server power-on <id>  [--wait]
-arianet server power-off <id> [--wait]
-arianet server reinstall <id> --os <id> [--wait]
-arianet server delete <id>    [--wait]
-arianet server rename <id> --name <1-30 chars>
-arianet server toggle-protection <id> [--enable | --disable]
+arianet vps restart <id>   [--wait] [--timeout 15m]
+arianet vps power-on <id>  [--wait]
+arianet vps power-off <id> [--wait]
+arianet vps reinstall <id> --os <id> [--wait]
+arianet vps delete <id>    [--wait]
+arianet vps rename <id> --name <1-30 chars>
+arianet vps toggle-protection <id> [--enable | --disable]
 ```
 
-**Creating a server**
+**Creating a VPS**
 
 - Without `--plan`, `--region` or `--os` an interactive wizard asks for them.
 - With neither `--ssh-key` nor `--password`, a strong random root password is
@@ -355,7 +358,7 @@ arianet balance invoices get <number>         # Invoice with its line items
 ## Scripting
 
 ```bash
-arianet server list -o json | jq '.[].id'
+arianet vps list -o json | jq '.[].id'
 ```
 
 - With `-o json`, stdout carries only JSON. Progress, prompts and wait output go

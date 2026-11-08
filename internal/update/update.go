@@ -285,7 +285,9 @@ func Enabled(c Conditions) bool {
 	}
 	for _, f := range strings.Fields(c.CommandPath) {
 		switch f {
-		case "completion", "__complete", "__completeNoDesc":
+		case "completion", "__complete", "__completeNoDesc", "upgrade", "update":
+			// upgrade does its own lookup and must not announce the
+			// version it has just installed.
 			return false
 		}
 	}
@@ -305,16 +307,46 @@ func IsTerminal(f *os.File) bool {
 type InstallMethod int
 
 const (
+	// InstallScript is a standalone binary: install.sh, a manual download or
+	// the Windows .exe. `arianet upgrade` replaces it in place.
 	InstallScript InstallMethod = iota
 	InstallHomebrew
 	InstallApt
+	InstallRpm
 )
+
+func (m InstallMethod) String() string {
+	switch m {
+	case InstallHomebrew:
+		return "Homebrew"
+	case InstallApt:
+		return "apt"
+	case InstallRpm:
+		return "rpm"
+	default:
+		return "standalone binary"
+	}
+}
 
 var homebrewPrefixes = []string{"/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"}
 
-// DetectInstall works out the install method from the resolved executable
-// path. dpkgInfoDir is normally /var/lib/dpkg/info.
-func DetectInstall(exePath, dpkgInfoDir string) InstallMethod {
+// InstallEnv is what install detection looks at; tests fill it in.
+type InstallEnv struct {
+	GOOS        string
+	ExePath     string
+	DpkgInfoDir string // normally /var/lib/dpkg/info
+	// RpmOwns reports whether the rpm database owns a path; nil means no rpm.
+	RpmOwns func(path string) bool
+}
+
+// Detect works out how the binary at env.ExePath was installed. Windows
+// builds are always standalone; Homebrew is recognised on macOS and Linux;
+// dpkg and rpm ownership only on Linux.
+func Detect(env InstallEnv) InstallMethod {
+	if env.GOOS == "windows" {
+		return InstallScript
+	}
+	exePath := filepath.ToSlash(env.ExePath)
 	for _, p := range homebrewPrefixes {
 		if strings.HasPrefix(exePath, p) {
 			return InstallHomebrew
@@ -323,10 +355,22 @@ func DetectInstall(exePath, dpkgInfoDir string) InstallMethod {
 	if strings.Contains(exePath, "/Cellar/arianet/") {
 		return InstallHomebrew
 	}
-	if ownedByDpkg(exePath, filepath.Join(dpkgInfoDir, "arianet.list")) {
+	if env.GOOS != "linux" {
+		return InstallScript
+	}
+	if env.DpkgInfoDir != "" && ownedByDpkg(exePath, filepath.Join(env.DpkgInfoDir, "arianet.list")) {
 		return InstallApt
 	}
+	if env.RpmOwns != nil && env.RpmOwns(exePath) {
+		return InstallRpm
+	}
 	return InstallScript
+}
+
+// DetectInstall works out the install method from the resolved executable
+// path on a Linux-like system. dpkgInfoDir is normally /var/lib/dpkg/info.
+func DetectInstall(exePath, dpkgInfoDir string) InstallMethod {
+	return Detect(InstallEnv{GOOS: "linux", ExePath: exePath, DpkgInfoDir: dpkgInfoDir})
 }
 
 func ownedByDpkg(exePath, listFile string) bool {
@@ -356,15 +400,19 @@ func ExecutablePath() string {
 	return exe
 }
 
-// UpgradeCommand is the command that upgrades an installation.
+// AptUpgradeCommand upgrades an apt installation.
+const AptUpgradeCommand = "sudo apt-get update && sudo apt-get install --only-upgrade -y arianet"
+
+// UpgradeCommand is the package-manager command that upgrades an
+// installation; standalone binaries upgrade themselves with `arianet upgrade`.
 func UpgradeCommand(m InstallMethod) string {
 	switch m {
 	case InstallHomebrew:
 		return "brew upgrade ariaservice/arianet/arianet"
 	case InstallApt:
-		return "sudo apt update && sudo apt install --only-upgrade arianet"
+		return AptUpgradeCommand
 	default:
-		return "curl -fsSL https://raw.githubusercontent.com/ariaservice/arianet-cli/main/scripts/install.sh | sh"
+		return "arianet upgrade"
 	}
 }
 
@@ -374,11 +422,11 @@ func ReleaseURL(version string) string {
 }
 
 // Notice is the text printed when latest is newer than current.
-func Notice(current, latest string, m InstallMethod) string {
+func Notice(current, latest string) string {
 	cur := strings.TrimPrefix(current, "v")
 	lat := strings.TrimPrefix(latest, "v")
-	return fmt.Sprintf("\nA new release of arianet is available: %s → %s\nTo upgrade, run: %s\n%s\n",
-		cur, lat, UpgradeCommand(m), ReleaseURL(lat))
+	return fmt.Sprintf("\nA new release of arianet is available: %s → %s\nTo upgrade, run: arianet upgrade\n%s\n",
+		cur, lat, ReleaseURL(lat))
 }
 
 // Background is a lookup started at command start.

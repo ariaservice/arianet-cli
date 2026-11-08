@@ -219,6 +219,8 @@ func TestEnabled(t *testing.T) {
 		"empty version":   func(c *Conditions) { c.CurrentVersion = "" },
 		"completion":      func(c *Conditions) { c.CommandPath = "arianet completion zsh" },
 		"shell completer": func(c *Conditions) { c.CommandPath = "arianet __complete region" },
+		"upgrade":         func(c *Conditions) { c.CommandPath = "arianet upgrade" },
+		"update alias":    func(c *Conditions) { c.CommandPath = "arianet update" },
 	}
 	for name, mod := range mods {
 		c := base
@@ -261,17 +263,25 @@ func TestDetectInstall(t *testing.T) {
 }
 
 func TestNotice(t *testing.T) {
-	got := Notice("0.3.1", "v0.4.0", InstallHomebrew)
+	got := Notice("0.3.1", "v0.4.0")
 	want := "\nA new release of arianet is available: 0.3.1 → 0.4.0\n" +
-		"To upgrade, run: brew upgrade ariaservice/arianet/arianet\n" +
+		"To upgrade, run: arianet upgrade\n" +
 		"https://github.com/ariaservice/arianet-cli/releases/tag/v0.4.0\n"
 	if got != want {
 		t.Errorf("Notice =\n%q\nwant\n%q", got, want)
 	}
-	if !strings.Contains(Notice("0.3.1", "0.4.0", InstallApt), "sudo apt update && sudo apt install --only-upgrade arianet") {
-		t.Error("apt hint missing")
+}
+
+func TestUpgradeCommandPerMethod(t *testing.T) {
+	cases := map[InstallMethod]string{
+		InstallHomebrew: "brew upgrade ariaservice/arianet/arianet",
+		InstallApt:      "sudo apt-get update && sudo apt-get install --only-upgrade -y arianet",
+		InstallScript:   "arianet upgrade",
+		InstallRpm:      "arianet upgrade",
 	}
-	if !strings.Contains(Notice("0.3.1", "0.4.0", InstallScript), "scripts/install.sh | sh") {
-		t.Error("install.sh hint missing")
+	for m, want := range cases {
+		if got := UpgradeCommand(m); got != want {
+			t.Errorf("UpgradeCommand(%v) = %q, want %q", m, got, want)
+		}
 	}
 }

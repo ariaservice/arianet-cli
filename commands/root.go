@@ -2,8 +2,10 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/ariaservice/arianet-cli/internal/api"
@@ -48,13 +50,22 @@ Documentation: https://docs.ariaservice.net/cli`,
 
 // Execute is the entry point called from main.
 func Execute() {
+	update.CleanupOld(update.ExecutablePath(), runtime.GOOS)
 	err := rootCmd.Execute()
+	code := 0
 	if err != nil {
-		printer.Error(err.Error())
+		code = 1
+		var ee *exitError
+		if errors.As(err, &ee) {
+			code = ee.code
+		}
+		if err.Error() != "" {
+			printer.Error(err.Error())
+		}
 	}
 	printUpdateNotice()
-	if err != nil {
-		os.Exit(1)
+	if code != 0 {
+		os.Exit(code)
 	}
 }
 
@@ -87,8 +98,7 @@ func printUpdateNotice() {
 	if rel == nil {
 		return
 	}
-	method := update.DetectInstall(update.ExecutablePath(), "/var/lib/dpkg/info")
-	fmt.Fprint(os.Stderr, update.Notice(version.Version, rel.Version, method))
+	fmt.Fprint(os.Stderr, update.Notice(version.Version, rel.Version))
 }
 
 func init() {
@@ -111,6 +121,7 @@ func init() {
 		newPlanCmd(),
 		newCloudCmd(),
 		newVersionCmd(),
+		newUpgradeCmd(),
 	)
 }
 

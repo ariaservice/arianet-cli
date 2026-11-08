@@ -133,9 +133,15 @@ restarting and reinstalling_os.`,
 
 			rows := make([][]string, len(services))
 			for i, s := range services {
-				ip := s.PrimaryIP()
-				if ip == "" {
-					ip = printer.Dim("pending")
+				ipv4, ipv6 := s.IPv4Address(), s.IPv6Address()
+				if ipv4 == "" && ipv6 == "" {
+					ipv4 = printer.Dim("pending")
+				}
+				if ipv4 == "" {
+					ipv4 = printer.Dim("-")
+				}
+				if ipv6 == "" {
+					ipv6 = printer.Dim("-")
 				}
 
 				hostname := derefStr(s.Name)
@@ -172,7 +178,8 @@ restarting and reinstalling_os.`,
 					hostname,
 					printer.StatusBadge(s.Status),
 					providerStatus,
-					ip,
+					ipv4,
+					ipv6,
 					planName,
 					dcName,
 					osName,
@@ -182,7 +189,7 @@ restarting and reinstalling_os.`,
 
 			p.TableAdvanced(
 				"VPS",
-				[]string{"ID", "Name", "Status", "Provider", "IP Address", "Plan", "Region", "OS", "Protected"},
+				[]string{"ID", "Name", "Status", "Provider", "IPv4", "IPv6", "Plan", "Region", "OS", "Protected"},
 				rows,
 			)
 
@@ -230,9 +237,12 @@ func newServiceGetCmd() *cobra.Command {
 				return nil
 			}
 
-			ip := s.PrimaryIP()
-			if ip == "" {
-				ip = printer.Dim("-")
+			ipv4, ipv6 := s.IPv4Address(), s.IPv6Address()
+			if ipv4 == "" {
+				ipv4 = printer.Dim("-")
+			}
+			if ipv6 == "" {
+				ipv6 = printer.Dim("-")
 			}
 
 			planStr, dcStr, osStr := "-", "-", "-"
@@ -256,7 +266,8 @@ func newServiceGetCmd() *cobra.Command {
 					{"Provider Status", strings.ToLower(ptrOrDash(s.InstanceStatus))},
 					{"Protected", printer.BoolCheck(derefBool(s.Protected))},
 					{"Billing Cycle", ptrOrDash(s.Cycle)},
-					{"IP Address", ip},
+					{"IPv4", ipv4},
+					{"IPv6", ipv6},
 					{"Plan", planStr},
 					{"Region", dcStr},
 					{"OS", osStr},

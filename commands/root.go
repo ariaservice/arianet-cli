@@ -25,11 +25,11 @@ var rootCmd = &cobra.Command{
 	Short: "Arianet CLI — manage your cloud infrastructure",
 	Long: `Arianet CLI is the official command-line interface for the Arianet cloud platform.
 
-Manage servers, SSH keys, firewalls, and your account from the terminal.
+Manage VPS servers, Arianet Cloud, SSH keys, firewalls, and your account from the terminal.
 
 Get started:
   arianet configure            Configure your API token
-  arianet server list          List your cloud servers
+  arianet vps list             List your VPS servers
   arianet region list          List available regions
   arianet cloud servers list   List your Arianet Cloud servers
 

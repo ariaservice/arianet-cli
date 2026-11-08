@@ -2,7 +2,9 @@ package commands
 
 import (
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 
 	"github.com/ariaservice/arianet-cli/internal/api"
 	"github.com/ariaservice/arianet-cli/internal/printer"
@@ -123,8 +125,8 @@ func newPlanGetCmd() *cobra.Command {
 				[][]string{
 					{"ID", strconv.Itoa(plan.ID)},
 					{"Name", printer.Bold(plan.Name)},
-					{"CPU", fmtResource(plan.CPU)},
-					{"RAM", fmtResource(plan.RAM)},
+					{"CPU", fmtCPU(plan.CPU)},
+					{"RAM", fmtRAM(plan.RAM)},
 					{"Storage", fmtResource(plan.Storage)},
 					{"Billing Cycle", derefStr(plan.Cycle)},
 					{"Recommended", printer.BoolCheck(plan.Recommended)},
@@ -163,6 +165,32 @@ func fmtResource(r *api.ResourceValue) string {
 	return fmt.Sprintf("%d %s", r.Size, r.Unit)
 }
 
+// fmtCPU prints the plan's CPU as a vCPU count; the size is always a number
+// of virtual cores, whatever unit label the catalog carries.
+func fmtCPU(r *api.ResourceValue) string {
+	if r == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d vCPU", r.Size)
+}
+
+// fmtRAM prints memory, switching MB values of 1024 and above to GB
+// (1024 MB -> "1 GB", 1536 MB -> "1.5 GB").
+func fmtRAM(r *api.ResourceValue) string {
+	if r == nil {
+		return "-"
+	}
+	switch strings.ToLower(r.Unit) {
+	case "mb", "megabyte", "":
+		if r.Size >= 1024 {
+			gb := math.Round(float64(r.Size)/1024*100) / 100
+			return strconv.FormatFloat(gb, 'f', -1, 64) + " GB"
+		}
+		return fmt.Sprintf("%d MB", r.Size)
+	}
+	return fmtResource(r)
+}
+
 func planToRow(pl api.Plan) []string {
 	hourly, monthly, currency := "-", "-", "-"
 	if len(pl.Prices) > 0 {
@@ -182,8 +210,8 @@ func planToRow(pl api.Plan) []string {
 	return []string{
 		strconv.Itoa(pl.ID),
 		name,
-		fmtResource(pl.CPU),
-		fmtResource(pl.RAM),
+		fmtCPU(pl.CPU),
+		fmtRAM(pl.RAM),
 		fmtResource(pl.Storage),
 		hourly,
 		monthly,

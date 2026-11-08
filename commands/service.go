@@ -16,9 +16,9 @@ import (
 
 func newServerCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "server",
-		Aliases: []string{"servers", "srv"},
-		Short:   "Manage cloud servers",
+		Use:     "vps",
+		Aliases: []string{"server", "servers", "srv"},
+		Short:   "Manage virtual private servers (VPS)",
 	}
 
 	cmd.AddCommand(
@@ -70,7 +70,7 @@ func addWaitFlags(cmd *cobra.Command, wait *bool, timeout *time.Duration) {
 func maybeWait(client *api.Client, id int, spec waitSpec, wait bool, timeout time.Duration) {
 	if !wait {
 		if !jsonMode() {
-			printer.Info(fmt.Sprintf("Track progress: arianet server status %d   (or add --wait)", id))
+			printer.Info(fmt.Sprintf("Track progress: arianet vps status %d   (or add --wait)", id))
 		}
 		return
 	}
@@ -86,17 +86,17 @@ func newServiceListCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List your cloud servers",
-		Long: `List your cloud servers.
+		Short: "List your VPS servers",
+		Long: `List your VPS servers.
 
 Without --status, active and suspended servers are shown. Other statuses
 include creating, pending, failed, terminated, powering_on, powering_off,
 restarting and reinstalling_os.`,
-		Example: `  arianet server list
-  arianet server list --status active
-  arianet server list --status terminated
-  arianet server list --page 2 --limit 20
-  arianet server list --output json`,
+		Example: `  arianet vps list
+  arianet vps list --status active
+  arianet vps list --status terminated
+  arianet vps list --page 2 --limit 20
+  arianet vps list --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := requireAuth()
 			if err != nil {
@@ -120,12 +120,12 @@ restarting and reinstalling_os.`,
 				if status == "" {
 					printer.EmptyState(
 						"No active or suspended servers found",
-						"Use --status to view other servers or create one with: arianet server create",
+						"Use --status to view other servers or create one with: arianet vps create",
 					)
 				} else {
 					printer.EmptyState(
 						fmt.Sprintf("No %s servers found", status),
-						"Try a different status or create a new server with: arianet server create",
+						"Try a different status or create a new server with: arianet vps create",
 					)
 				}
 				return nil
@@ -204,8 +204,8 @@ func newServiceGetCmd() *cobra.Command {
 		Use:   "get <id>",
 		Short: "Get details of a server",
 		Args:  cobra.ExactArgs(1),
-		Example: `  arianet server get 42
-  arianet server get 42 --output json`,
+		Example: `  arianet vps get 42
+  arianet vps get 42 --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -285,8 +285,8 @@ func newServiceCreateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a new cloud server",
-		Long: `Create a new cloud server.
+		Short: "Create a new VPS",
+		Long: `Create a new VPS.
 
 If --plan, --region or --os is omitted, an interactive wizard guides you
 through the choice.
@@ -301,10 +301,10 @@ The command waits until the server is active (up to --timeout). Use
 Every order carries an idempotency key, so a retry after a network failure can
 never buy a second server. If the command is interrupted before it can tell
 you the outcome, re-run it with the same --idempotency-key it printed.`,
-		Example: `  arianet server create                                   # interactive wizard
-  arianet server create --plan 5 --region 1 --os 3 --hostname web-01
-  arianet server create --plan 5 --region 1 --os 3 --hostname web-01 --ssh-key 2
-  arianet server create --plan 5 --region 1 --os 3 --no-wait --yes --output json`,
+		Example: `  arianet vps create                                   # interactive wizard
+  arianet vps create --plan 5 --region 1 --os 3 --hostname web-01
+  arianet vps create --plan 5 --region 1 --os 3 --hostname web-01 --ssh-key 2
+  arianet vps create --plan 5 --region 1 --os 3 --no-wait --yes --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sshKeyID > 0 && password != "" {
 				return fmt.Errorf("use either --ssh-key or --password, not both")
@@ -392,13 +392,13 @@ you the outcome, re-run it with the same --idempotency-key it printed.`,
 
 			if noWait {
 				if !jsonMode() {
-					printer.Info(fmt.Sprintf("Track progress: arianet server status %d", created.ID))
+					printer.Info(fmt.Sprintf("Track progress: arianet vps status %d", created.ID))
 				}
 				return nil
 			}
 			finishWait(created.ID, waitProvisioned(), waitForServer(client, created.ID, waitProvisioned(), timeout), timeout)
 			if !jsonMode() {
-				printer.Info(fmt.Sprintf("Details: arianet server get %d", created.ID))
+				printer.Info(fmt.Sprintf("Details: arianet vps get %d", created.ID))
 			}
 			return nil
 		},
@@ -653,8 +653,8 @@ func newServiceDeleteCmd() *cobra.Command {
 		Use:   "delete <id>",
 		Short: "Delete a server",
 		Args:  cobra.ExactArgs(1),
-		Example: `  arianet server delete 42
-  arianet server delete 42 --yes --wait`,
+		Example: `  arianet vps delete 42
+  arianet vps delete 42 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -696,8 +696,8 @@ func newServiceStatusCmd() *cobra.Command {
 		Use:   "status <id>",
 		Short: "Get the current status of a server",
 		Args:  cobra.ExactArgs(1),
-		Example: `  arianet server status 42
-  arianet server status 42 --output json`,
+		Example: `  arianet vps status 42
+  arianet vps status 42 --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -743,8 +743,8 @@ func newServiceActionsCmd() *cobra.Command {
 		Long: `Show the operations performed on a server (create, restart, reinstall, ...),
 newest first, with their outcome.`,
 		Args: cobra.ExactArgs(1),
-		Example: `  arianet server actions 42
-  arianet server actions 42 --limit 50 --output json`,
+		Example: `  arianet vps actions 42
+  arianet vps actions 42 --limit 50 --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -798,8 +798,8 @@ func newServiceRestartCmd() *cobra.Command {
 		Use:   "restart <id>",
 		Short: "Restart a server",
 		Args:  cobra.ExactArgs(1),
-		Example: `  arianet server restart 42
-  arianet server restart 42 --yes --wait`,
+		Example: `  arianet vps restart 42
+  arianet vps restart 42 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -846,7 +846,7 @@ func newServicePowerOnCmd() *cobra.Command {
 		Use:     "power-on <id>",
 		Short:   "Power on a server",
 		Args:    cobra.ExactArgs(1),
-		Example: `  arianet server power-on 42 --wait`,
+		Example: `  arianet vps power-on 42 --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -886,7 +886,7 @@ func newServicePowerOffCmd() *cobra.Command {
 		Use:     "power-off <id>",
 		Short:   "Power off a server",
 		Args:    cobra.ExactArgs(1),
-		Example: `  arianet server power-off 42 --yes --wait`,
+		Example: `  arianet vps power-off 42 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -930,7 +930,7 @@ func newServiceRenameCmd() *cobra.Command {
 		Use:     "rename <id>",
 		Short:   "Rename a server",
 		Args:    cobra.ExactArgs(1),
-		Example: `  arianet server rename 42 --name new-hostname`,
+		Example: `  arianet vps rename 42 --name new-hostname`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -974,8 +974,8 @@ func newServiceReinstallCmd() *cobra.Command {
 		Use:   "reinstall <id>",
 		Short: "Reinstall the OS on a server",
 		Args:  cobra.ExactArgs(1),
-		Example: `  arianet server reinstall 42 --os 3
-  arianet server reinstall 42 --os 3 --yes --wait`,
+		Example: `  arianet vps reinstall 42 --os 3
+  arianet vps reinstall 42 --os 3 --yes --wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {
@@ -1026,9 +1026,9 @@ func newServiceProtectCmd() *cobra.Command {
 With --enable or --disable the state is set explicitly (safe to repeat in
 scripts). With neither, the current state is flipped.`,
 		Args: cobra.ExactArgs(1),
-		Example: `  arianet server toggle-protection 42 --enable
-  arianet server toggle-protection 42 --disable
-  arianet server toggle-protection 42`,
+		Example: `  arianet vps toggle-protection 42 --enable
+  arianet vps toggle-protection 42 --disable
+  arianet vps toggle-protection 42`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseServerID(args[0])
 			if err != nil {

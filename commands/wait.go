@@ -214,13 +214,13 @@ func finishWait(id int, spec waitSpec, outcome waitOutcome, timeout time.Duratio
 	case waitDone:
 		fmt.Fprintf(os.Stderr, "\n  %s finished for server #%d.\n\n", spec.label, id)
 	case waitFailed:
-		fmt.Fprintf(os.Stderr, "\n  %s failed for server #%d. Details: arianet server actions %d\n\n", spec.label, id, id)
+		fmt.Fprintf(os.Stderr, "\n  %s failed for server #%d. Details: arianet vps actions %d\n\n", spec.label, id, id)
 		os.Exit(1)
 	case waitTimedOut:
-		fmt.Fprintf(os.Stderr, "\n  %s is still in progress after %s. Check: arianet server status %d\n\n", spec.label, timeout, id)
+		fmt.Fprintf(os.Stderr, "\n  %s is still in progress after %s. Check: arianet vps status %d\n\n", spec.label, timeout, id)
 		os.Exit(1)
 	case waitAborted:
-		fmt.Fprintf(os.Stderr, "  Check manually: arianet server status %d\n\n", id)
+		fmt.Fprintf(os.Stderr, "  Check manually: arianet vps status %d\n\n", id)
 		os.Exit(1)
 	}
 }

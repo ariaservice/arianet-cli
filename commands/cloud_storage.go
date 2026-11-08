@@ -87,54 +87,6 @@ func newCloudVolumesCmd() *cobra.Command {
 	return cmd
 }
 
-var cloudPlacementGroup = cloudResource{
-	plural: "placement-groups", singular: "placement group", path: "/placement-groups",
-	cols: []col{
-		{"ID", "id"}, {"Name", "name"}, {"Type", "type"}, {"Datacenter", "datacenter"},
-		{"Status", "status"}, {"Servers", "servers"}, {"Labels", "labels"},
-	},
-	detail: []col{
-		{"ID", "id"}, {"Name", "name"}, {"Type", "type"}, {"Datacenter", "datacenter"}, {"Status", "status"},
-		{"Servers", "servers"}, {"Max servers", "max_servers"}, {"Labels", "labels"}, {"Project", "project_id"},
-		{"Created", "created_at"},
-	},
-}
-
-func newCloudPlacementGroupsCmd() *cobra.Command {
-	r := cloudPlacementGroup
-	cmd := &cobra.Command{
-		Use:     "placement-groups",
-		Aliases: []string{"placement-group", "pg"},
-		Short:   "Manage placement groups (spread servers over hosts)",
-	}
-	cmd.AddCommand(
-		r.listCmd("  arianet cloud placement-groups list", nil, nil),
-		r.getCmd(),
-		r.createCmd("  arianet cloud placement-groups create --name db --datacenter eu-central-1",
-			func(cmd *cobra.Command) {
-				cmd.Flags().String("name", "", "group name")
-				cmd.Flags().String("datacenter", "", "datacenter code")
-				cmd.Flags().String("type", "spread", "placement type")
-				_ = cmd.MarkFlagRequired("name")
-				_ = cmd.MarkFlagRequired("datacenter")
-			}, func(cmd *cobra.Command, body map[string]any) error {
-				changedString(cmd, body, "name", "name")
-				changedString(cmd, body, "datacenter", "datacenter")
-				typ, _ := cmd.Flags().GetString("type")
-				body["type"] = typ
-				return nil
-			}),
-		r.patchCmd("  arianet cloud placement-groups update 3 --name db-spread", func(cmd *cobra.Command) {
-			cmd.Flags().String("name", "", "new name")
-		}, func(cmd *cobra.Command, body map[string]any) error {
-			changedString(cmd, body, "name", "name")
-			return nil
-		}),
-		r.deleteCmd(),
-	)
-	return cmd
-}
-
 var imageCols = []col{
 	{"ID", "id"}, {"Image", "image"}, {"Type", "type"}, {"Name", "name"}, {"Datacenters", "datacenters"},
 	{"Min disk (GB)", "min_disk_gb"}, {"Status", "status"}, {"Labels", "labels"},

@@ -142,3 +142,19 @@ Homepage: https://github.com/ariaservice/arianet-cli
 Description: Command-line client for the Ariaservice cloud API.
  Manage servers, SSH keys, firewalls and balance from the terminal.
 
+Package: arianet
+Architecture: arm64
+Version: 0.5.1
+Priority: optional
+Maintainer: Ariaservice <support@ariaservice.net>
+Installed-Size: 10333
+Filename: pool/arianet_0.5.1_linux_arm64.deb
+Size: 4277550
+MD5sum: 1ef09db66d5f98ee6767c0db270a823c
+SHA1: 3b1219f788a05280c0a1d640829dfef5f496f9b4
+SHA256: e7dfc4a5a9e23c4e7139a8b7fdcb29cafc3cf1a4d3c3728f2df7d17191ec17f1
+SHA512: 2ab96b444abb8467b2389437ad1344ef8a877e50dcdef18e396fd692df2be0496ff1a1422d909861d1b20b0d27318cc5e96c95e775b0cd57848402d24c1596ce
+Homepage: https://github.com/ariaservice/arianet-cli
+Description: Command-line client for the Ariaservice cloud API.
+ Manage servers, SSH keys, firewalls and balance from the terminal.
+

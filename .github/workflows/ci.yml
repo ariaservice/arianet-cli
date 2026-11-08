@@ -32,3 +32,57 @@ jobs:
           go-version: stable
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
+
+  # Runs scripts/install.ps1 the way users do (`irm ... | iex` evaluates the text in
+  # the current session) under Windows PowerShell 5.1 and PowerShell 7, against the
+  # real latest release, then checks the installed binary, the user PATH entry and
+  # that `arianet upgrade` recognises the install.
+  install-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install into a temp folder
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $env:ARIANET_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'arianet-bin'
+          Invoke-Expression (Get-Content -Raw scripts/install.ps1)
+          if ($LASTEXITCODE -ne 0) { throw 'install.ps1 failed' }
+          $exe = Join-Path $env:ARIANET_INSTALL_DIR 'arianet.exe'
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          # The script put the folder on this session's PATH.
+          (Get-Command arianet).Source
+          arianet version
+          if ($LASTEXITCODE -ne 0) { throw 'arianet version failed' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains $env:ARIANET_INSTALL_DIR) { throw "user PATH lacks $env:ARIANET_INSTALL_DIR" }
+          Get-ChildItem -Force $env:ARIANET_INSTALL_DIR | Format-Table Name, Length
+      - name: Re-run over an existing install, default location
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          Invoke-Expression (Get-Content -Raw scripts/install.ps1)
+          Invoke-Expression (Get-Content -Raw scripts/install.ps1)
+          if ($LASTEXITCODE -ne 0) { throw 'install.ps1 failed' }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\arianet'
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $hits = @($userPath -split ';' | Where-Object { $_ -eq $dir }).Count
+          if ($hits -ne 1) { throw "expected $dir once in the user PATH, found $hits" }
+          & (Join-Path $dir 'arianet.exe') version
+          & (Join-Path $dir 'arianet.exe') upgrade --check
+          if ($LASTEXITCODE -ne 0) { throw "arianet upgrade --check exited $LASTEXITCODE" }
+      - name: A bad version fails cleanly
+        run: |
+          $env:ARIANET_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'arianet-bad'
+          $env:ARIANET_VERSION = '0.0.0'
+          Invoke-Expression (Get-Content -Raw scripts/install.ps1) 2>$null
+          if ($LASTEXITCODE -ne 1) { throw "expected exit 1, got $LASTEXITCODE" }
+          if (Test-Path (Join-Path $env:ARIANET_INSTALL_DIR 'arianet.exe')) { throw 'half-installed arianet.exe left behind' }
+          $global:LASTEXITCODE = 0

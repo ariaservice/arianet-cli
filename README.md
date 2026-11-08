@@ -12,6 +12,34 @@ ships. See [What it does and does not do](#what-it-does-and-does-not-do) before 
 
 ## Installation
 
+**macOS / Linux** (terminal):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ariaservice/arianet-cli/main/scripts/install.sh | sh
+```
+
+**Windows** (PowerShell, no Administrator needed):
+
+```powershell
+irm https://raw.githubusercontent.com/ariaservice/arianet-cli/main/scripts/install.ps1 | iex
+```
+
+Then run `arianet configure` and paste an API token from
+<https://cloud.ariaservice.net/users/api-tokens>; `arianet vps list` shows your servers.
+
+Both scripts download the release archive from this repository, verify its SHA-256 against
+`checksums.txt`, and copy a single binary; read them first if you like
+([install.sh](scripts/install.sh), [install.ps1](scripts/install.ps1)).
+
+- `install.sh` installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`, and also
+  verifies the Sigstore signature when `cosign` is installed. Environment: `VERSION`, `INSTALL_DIR`.
+- `install.ps1` installs `arianet.exe` into `%LOCALAPPDATA%\Programs\arianet` and adds that folder
+  to your user `PATH` (open a new terminal window afterwards). It works in Windows PowerShell 5.1
+  and PowerShell 7. Environment: `ARIANET_VERSION` (e.g. `0.5.0`), `ARIANET_INSTALL_DIR`. Only a
+  64-bit x64 build is published; on Windows 11 on ARM the x64 build runs through emulation.
+
+Other ways to install:
+
 ### Ubuntu / Debian (apt)
 
 ```bash
@@ -39,16 +67,6 @@ brew install ariaservice/arianet/arianet
 
 The formula lives in [ariaservice/homebrew-arianet](https://github.com/ariaservice/homebrew-arianet).
 It only downloads the release archive from this repository and checks its SHA-256.
-
-### Install script
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ariaservice/arianet-cli/main/scripts/install.sh | sh
-```
-
-[Read the script first](scripts/install.sh): it downloads the release archive, verifies its SHA-256
-against `checksums.txt` (and the signature too if you have `cosign`), and copies one file into
-`~/.local/bin` (or `/usr/local/bin` when writable). Nothing else.
 
 ### Manual download and verification
 
@@ -90,7 +108,7 @@ arianet upgrade --version v0.4.0 --allow-downgrade   # a specific release (stand
 | Homebrew (macOS, Linuxbrew) | runs `brew upgrade ariaservice/arianet/arianet` |
 | apt | runs `sudo apt-get update && sudo apt-get install --only-upgrade -y arianet` in a terminal; otherwise prints that command and exits 1 |
 | .rpm | downloads the release `.rpm`, verifies it, runs `sudo rpm -U` (prints the command when not in a terminal) |
-| install script, manual download, Windows `.exe` | downloads the release archive for your OS/architecture, verifies its SHA-256 against `checksums.txt` (and the Sigstore signature when `cosign` is installed), checks that the new binary runs, then swaps it in atomically |
+| install.sh, install.ps1, manual download, Windows `.exe` | downloads the release archive for your OS/architecture, verifies its SHA-256 against `checksums.txt` (and the Sigstore signature when `cosign` is installed), checks that the new binary runs, then swaps it in atomically |
 
 The swap writes the new binary next to the old one and renames it into place, so a failed
 upgrade leaves the old binary untouched. On Windows the running `arianet.exe` is moved

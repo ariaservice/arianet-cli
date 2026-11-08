@@ -190,6 +190,17 @@ func TestBackgroundReportsNewer(t *testing.T) {
 	}
 }
 
+func TestBackgroundFreshCacheIsReadyAtOnce(t *testing.T) {
+	c := &Checker{CacheFile: filepath.Join(t.TempDir(), "c.json"), URL: "http://127.0.0.1:1/unreachable"}
+	if err := c.writeCache(&Release{Version: "0.4.0", CheckedAt: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	rel := Start(c, "0.3.1").Ready()
+	if rel == nil || rel.Version != "0.4.0" {
+		t.Fatalf("fresh cache must be ready immediately, got %v", rel)
+	}
+}
+
 func TestEnabled(t *testing.T) {
 	env := func(m map[string]string) func(string) string {
 		return func(k string) string { return m[k] }

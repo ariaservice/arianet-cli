@@ -86,5 +86,7 @@ jobs:
           $out
           if ($LASTEXITCODE -ne 1) { throw "expected exit 1, got $LASTEXITCODE" }
           if ($out -notmatch 'not found: ') { throw 'expected a not-found error for a missing release' }
+          if ($out -notmatch 'check ARIANET_VERSION') { throw 'expected the not-found hint' }
+          if ($out -match '[^\x00-\x7F]') { throw 'installer output must be English (ASCII) only' }
           if (Test-Path (Join-Path $env:ARIANET_INSTALL_DIR 'arianet.exe')) { throw 'half-installed arianet.exe left behind' }
           $global:LASTEXITCODE = 0

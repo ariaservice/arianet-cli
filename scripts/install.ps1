@@ -14,9 +14,6 @@
 #   ARIANET_VERSION      a release to install, e.g. 0.5.0 (default: the latest release)
 #   ARIANET_INSTALL_DIR  where arianet.exe goes (default: %LOCALAPPDATA%\Programs\arianet)
 #   GITHUB_TOKEN         used only for the release lookup, to avoid GitHub API rate limits
-#
-# This file is ASCII on purpose: Persian text is written as \uXXXX escapes so it
-# survives Windows PowerShell 5.1 reading the script in the system code page.
 
 & {
     Set-StrictMode -Version 2.0
@@ -26,34 +23,12 @@
     $Repo = 'ariaservice/arianet-cli'
     $Binary = 'arianet.exe'
 
-    $Fa = @{
-        Installing  = '\u062f\u0631 \u062d\u0627\u0644 \u0646\u0635\u0628'
-        ChecksumOk  = '\u0635\u062d\u062a \u0641\u0627\u06cc\u0644 \u062a\u0623\u06cc\u06cc\u062f \u0634\u062f'
-        Installed   = '\u0646\u0635\u0628 \u0634\u062f'
-        PathAdded   = '\u0628\u0647 PATH \u06a9\u0627\u0631\u0628\u0631 \u0627\u0636\u0627\u0641\u0647 \u0634\u062f\u061b \u067e\u0646\u062c\u0631\u0647\u200c\u0647\u0627\u06cc \u062c\u062f\u06cc\u062f \u062a\u0631\u0645\u06cc\u0646\u0627\u0644 \u0622\u0646 \u0631\u0627 \u0645\u06cc\u200c\u0634\u0646\u0627\u0633\u0646\u062f'
-        Next        = '\u0645\u0631\u062d\u0644\u0647 \u0628\u0639\u062f'
-        Configure   = '\u062a\u0648\u06a9\u0646 API \u0631\u0627 \u0627\u0632 \u067e\u0646\u0644 \u0628\u0633\u0627\u0632\u06cc\u062f \u0648 \u0627\u06cc\u0646\u062c\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'
-        List        = '\u0641\u0647\u0631\u0633\u062a \u0633\u0631\u0648\u0631\u0647\u0627\u06cc \u0634\u0645\u0627'
-        Upgrade     = '\u0628\u0647\u200c\u0631\u0648\u0632\u0631\u0633\u0627\u0646\u06cc'
-        Error       = '\u062e\u0637\u0627'
-        ArmEmulated = '\u0648\u06cc\u0646\u062f\u0648\u0632 ARM64: \u0646\u0633\u062e\u0647 x64 \u0628\u0627 \u0634\u0628\u06cc\u0647\u200c\u0633\u0627\u0632\u06cc \u0648\u06cc\u0646\u062f\u0648\u0632 \u06f1\u06f1 \u0646\u0635\u0628 \u0645\u06cc\u200c\u0634\u0648\u062f'
-        ArmTooOld   = '\u0648\u06cc\u0646\u062f\u0648\u0632 ARM64 \u067e\u06cc\u0634 \u0627\u0632 \u0648\u06cc\u0646\u062f\u0648\u0632 \u06f1\u06f1 \u0628\u0631\u0646\u0627\u0645\u0647\u200c\u0647\u0627\u06cc x64 \u0631\u0627 \u0627\u062c\u0631\u0627 \u0646\u0645\u06cc\u200c\u06a9\u0646\u062f'
-        X86         = '\u0648\u06cc\u0646\u062f\u0648\u0632 \u06f3\u06f2 \u0628\u06cc\u062a\u06cc \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u0646\u0645\u06cc\u200c\u0634\u0648\u062f'
-        BadChecksum = '\u0641\u0627\u06cc\u0644 \u062f\u0627\u0646\u0644\u0648\u062f\u0634\u062f\u0647 \u0628\u0627 checksums.txt \u06cc\u06a9\u0633\u0627\u0646 \u0646\u06cc\u0633\u062a\u061b \u0646\u0635\u0628 \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f'
-        Network     = '\u062f\u0627\u0646\u0644\u0648\u062f \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062f\u061b \u0627\u062a\u0635\u0627\u0644 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f'
-        NotFound    = '\u0646\u0633\u062e\u0647 \u06cc\u0627 \u0641\u0627\u06cc\u0644 \u0645\u0648\u0631\u062f\u0646\u0638\u0631 \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f\u061b \u0645\u0642\u062f\u0627\u0631 ARIANET_VERSION \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f'
-    }
-    foreach ($key in @($Fa.Keys)) { $Fa[$key] = [regex]::Unescape($Fa[$key]) }
-
-    # A failure carries an English and a Persian line; the catch at the bottom prints both.
-    function Fail([string]$English, [string]$Persian) {
-        $err = New-Object System.Exception $English
-        $err.Data['fa'] = $Persian
-        throw $err
+    function Fail([string]$Message) {
+        throw (New-Object System.Exception $Message)
     }
 
-    function Say([string]$English, [string]$Persian) {
-        if ($Persian) { Write-Host "$English  |  $Persian" } else { Write-Host $English }
+    function Say([string]$Message) {
+        Write-Host $Message
     }
 
     function Download([string]$Url, [string]$OutFile) {
@@ -70,9 +45,9 @@
                 try { $status = [int]$response.StatusCode } catch { $status = 0 }
             }
             if ($status -eq 404) {
-                Fail "not found: $Url (no release v$version, or it has no $([IO.Path]::GetFileName($OutFile)); check ARIANET_VERSION)" $Fa.NotFound
+                Fail "not found: $Url (no release v$version, or it has no $([IO.Path]::GetFileName($OutFile)); check ARIANET_VERSION)"
             }
-            Fail "could not download ${Url}: $($_.Exception.Message)" $Fa.Network
+            Fail "could not download ${Url}: $($_.Exception.Message) (check your internet connection)"
         }
     }
 
@@ -80,17 +55,10 @@
     $onWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or ((Get-Variable -Name IsWindows -ValueOnly -ErrorAction SilentlyContinue) -eq $true)
 
     $savedProtocol = [Net.ServicePointManager]::SecurityProtocol
-    $savedOutputEncoding = $null
     $tmpDir = $null
     try {
         # PowerShell 5.1 defaults to TLS 1.0, which GitHub refuses.
         [Net.ServicePointManager]::SecurityProtocol = $savedProtocol -bor [Net.SecurityProtocolType]::Tls12
-        if ($onWindows) {
-            try {
-                $savedOutputEncoding = [Console]::OutputEncoding
-                [Console]::OutputEncoding = [Text.Encoding]::UTF8
-            } catch { $savedOutputEncoding = $null }
-        }
 
         # Only windows_amd64 is released (.goreleaser.yaml ignores windows/arm64).
         $arch = 'amd64'
@@ -105,19 +73,19 @@
                 '^(X64|AMD64)$' { break }
                 '^ARM64$' {
                     if ([Environment]::OSVersion.Version.Build -ge 22000) {
-                        Say 'Windows on ARM64: installing the x64 build, which Windows 11 runs through emulation.' $Fa.ArmEmulated
+                        Say 'Windows on ARM64: installing the x64 build, which Windows 11 runs through emulation.'
                     } else {
-                        Fail 'Windows on ARM64 runs x64 programs only from Windows 11 on; there is no native ARM64 build yet.' $Fa.ArmTooOld
+                        Fail 'Windows on ARM64 runs x64 programs only from Windows 11 on; there is no native ARM64 build yet.'
                     }
                     break
                 }
-                default { Fail "unsupported Windows architecture: $osArch (only 64-bit Windows is supported)" $Fa.X86 }
+                default { Fail "unsupported Windows architecture: $osArch (only 64-bit Windows is supported)" }
             }
         }
 
         $installDir = $env:ARIANET_INSTALL_DIR
         if (-not $installDir) {
-            if (-not $env:LOCALAPPDATA) { Fail 'LOCALAPPDATA is not set; set ARIANET_INSTALL_DIR to choose the install folder' $null }
+            if (-not $env:LOCALAPPDATA) { Fail 'LOCALAPPDATA is not set; set ARIANET_INSTALL_DIR to choose the install folder' }
             $installDir = Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'arianet'
         }
         $installDir = [IO.Path]::GetFullPath($installDir)
@@ -138,14 +106,14 @@
                     elseif ($resp.BaseResponse.PSObject.Properties['RequestMessage']) { $final = $resp.BaseResponse.RequestMessage.RequestUri }
                     if ($final) { $version = ([string]$final).TrimEnd('/').Split('/')[-1] }
                 } catch {
-                    Fail "could not look up the latest release: $($_.Exception.Message)" $Fa.Network
+                    Fail "could not look up the latest release: $($_.Exception.Message) (check your internet connection)"
                 }
             }
         }
         $version = ([string]$version).Trim()
         if ($version.StartsWith('v')) { $version = $version.Substring(1) }
         if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$') {
-            Fail "could not determine a valid version (got '$version'); set ARIANET_VERSION, e.g. 0.5.0" $null
+            Fail "could not determine a valid version (got '$version'); set ARIANET_VERSION, e.g. 0.5.0"
         }
 
         $archive = "arianet_${version}_windows_${arch}.zip"
@@ -154,7 +122,7 @@
         $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ('arianet-install-' + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $tmpDir | Out-Null
 
-        Say "Installing arianet $version (windows/$arch)" "$($Fa.Installing) arianet $version"
+        Say "Installing arianet $version (windows/$arch)"
         $archivePath = Join-Path $tmpDir $archive
         $sumsPath = Join-Path $tmpDir 'checksums.txt'
         Download "$base/$archive" $archivePath
@@ -166,15 +134,15 @@
             $fields = $line.Trim() -split '\s+'
             if ($fields.Count -eq 2 -and $fields[1].TrimStart('*') -eq $archive) { $expected = $fields[0].ToLowerInvariant() }
         }
-        if (-not $expected) { Fail "$archive is not listed in checksums.txt" $Fa.BadChecksum }
+        if (-not $expected) { Fail "$archive is not listed in checksums.txt" }
         $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
-        if ($actual -ne $expected) { Fail "checksum mismatch for $archive; refusing to install" $Fa.BadChecksum }
-        Say '  checksum OK' $Fa.ChecksumOk
+        if ($actual -ne $expected) { Fail "checksum mismatch for $archive; refusing to install" }
+        Say '  checksum OK'
 
         $extractDir = Join-Path $tmpDir 'extract'
         Expand-Archive -LiteralPath $archivePath -DestinationPath $extractDir -Force
         $newExe = Join-Path $extractDir $Binary
-        if (-not (Test-Path -LiteralPath $newExe -PathType Leaf)) { Fail "$Binary not found in $archive" $null }
+        if (-not (Test-Path -LiteralPath $newExe -PathType Leaf)) { Fail "$Binary not found in $archive" }
 
         # Copy next to the target under a temporary name, then rename it into place, so a
         # failure never leaves a half-written arianet.exe. A running arianet.exe cannot be
@@ -201,9 +169,9 @@
             }
         } catch {
             Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
-            Fail "could not write $target ($($_.Exception.Message)); close any running arianet and try again" $null
+            Fail "could not write $target ($($_.Exception.Message)); close any running arianet and try again"
         }
-        Say "Installed $target" "$($Fa.Installed): $target"
+        Say "Installed $target"
 
         if ($onWindows) {
             # User PATH, read without expanding %VARS% so existing entries keep their form.
@@ -222,7 +190,7 @@
                 # Explorer and new terminals pick up the new PATH without a sign-out.
                 [Environment]::SetEnvironmentVariable('ARIANET_INSTALL_TMP', '1', 'User')
                 [Environment]::SetEnvironmentVariable('ARIANET_INSTALL_TMP', $null, 'User')
-                Say "  added $installDir to your user PATH (new terminal windows will find arianet)" $Fa.PathAdded
+                Say "  added $installDir to your user PATH (new terminal windows will find arianet)"
             }
             $sessionEntries = @($env:Path -split ';' | ForEach-Object { $_.TrimEnd('\') })
             if ($sessionEntries -notcontains $normalized) { $env:Path = "$installDir;$env:Path" }
@@ -234,23 +202,19 @@
         }
 
         Write-Host ''
-        Say 'Next:' "$($Fa.Next):"
-        Say '  arianet configure     (paste an API token from https://cloud.ariaservice.net/users/api-tokens)' $Fa.Configure
-        Say '  arianet vps list' $Fa.List
-        Say '  arianet upgrade       (later, to update)' $Fa.Upgrade
+        Say 'Next:'
+        Say '  arianet configure     (paste an API token from https://cloud.ariaservice.net/users/api-tokens)'
+        Say '  arianet vps list'
+        Say '  arianet upgrade       (later, to update)'
     } catch {
         $message = $_.Exception.Message
-        $persian = $null
-        if ($_.Exception.Data.Contains('fa')) { $persian = $_.Exception.Data['fa'] }
         Write-Host "error: $message" -ForegroundColor Red
-        if ($persian) { Write-Host "$($Fa.Error): $persian" -ForegroundColor Red }
         # Under `irm | iex` an `exit` would close the user's window; a non-terminating
         # error lets scripts and CI see the failure ($?) while the window stays open.
         Write-Error -Message "arianet install failed: $message" -ErrorAction Continue
         $global:LASTEXITCODE = 1
     } finally {
         if ($tmpDir) { Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue }
-        if ($null -ne $savedOutputEncoding) { try { [Console]::OutputEncoding = $savedOutputEncoding } catch { } }
         [Net.ServicePointManager]::SecurityProtocol = $savedProtocol
     }
 }

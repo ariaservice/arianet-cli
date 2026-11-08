@@ -9,6 +9,8 @@ import (
 	"github.com/ariaservice/arianet-cli/internal/api"
 	"github.com/ariaservice/arianet-cli/internal/config"
 	"github.com/ariaservice/arianet-cli/internal/printer"
+	"github.com/ariaservice/arianet-cli/internal/update"
+	"github.com/ariaservice/arianet-cli/pkg/version"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +20,7 @@ var (
 	apiURLOverride string
 	cfg            *config.Config
 	cfgErr         error
+	updateCheck    *update.Background
 )
 
 var rootCmd = &cobra.Command{
@@ -33,6 +36,11 @@ Get started:
   arianet region list          List available regions
   arianet cloud servers list   List your Arianet Cloud servers
 
+Environment:
+  ARIANET_TOKEN                 API token
+  ARIANET_API_URL               Override the API base URL
+  ARIANET_NO_UPDATE_NOTIFIER    Set to any value to stop new-release notices
+
 Documentation: https://docs.ariaservice.net/cli`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -40,10 +48,47 @@ Documentation: https://docs.ariaservice.net/cli`,
 
 // Execute is the entry point called from main.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	err := rootCmd.Execute()
+	if err != nil {
 		printer.Error(err.Error())
+	}
+	printUpdateNotice()
+	if err != nil {
 		os.Exit(1)
 	}
+}
+
+// startUpdateCheck begins the background release lookup when the notifier
+// is allowed for this run (see internal/update).
+func startUpdateCheck() {
+	commandPath := ""
+	if c, _, err := rootCmd.Find(os.Args[1:]); err == nil {
+		commandPath = c.CommandPath()
+	}
+	if !update.Enabled(update.Conditions{
+		CurrentVersion: version.Version,
+		Output:         cfg.Output,
+		CommandPath:    commandPath,
+		StderrIsTTY:    update.IsTerminal(os.Stderr),
+	}) {
+		return
+	}
+	dir, err := config.Dir()
+	if err != nil {
+		return
+	}
+	updateCheck = update.Start(&update.Checker{CacheFile: update.CacheFile(dir)}, version.Version)
+}
+
+// printUpdateNotice prints the new-release notice to stderr if the lookup
+// already finished; it never waits for it.
+func printUpdateNotice() {
+	rel := updateCheck.Ready()
+	if rel == nil {
+		return
+	}
+	method := update.DetectInstall(update.ExecutablePath(), "/var/lib/dpkg/info")
+	fmt.Fprint(os.Stderr, update.Notice(version.Version, rel.Version, method))
 }
 
 func init() {
@@ -89,6 +134,7 @@ func initConfig() {
 		cfg.APIURL = apiURLOverride
 		cfg.APIURLSource = "--api-url"
 	}
+	startUpdateCheck()
 }
 
 // requireAuth checks that a token is configured and returns an API client.

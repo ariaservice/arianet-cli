@@ -146,6 +146,13 @@ You can also use environment variables:
 |-------------------|-------------------------|
 | `ARIANET_TOKEN`   | API authentication token |
 | `ARIANET_API_URL` | Override the API base URL (default `https://api.ariaservice.net`) |
+| `ARIANET_NO_UPDATE_NOTIFIER` | Set to any value to turn off the new-release notice |
+
+When a newer release is published, `arianet` prints a short notice with the upgrade
+command for your install method (Homebrew, apt or the install script) to stderr after a
+command. It checks GitHub at most once a day in the background, never delays or fails a
+command, and stays quiet with `-o json`, when stderr is not a terminal, when `CI` is set,
+or when `ARIANET_NO_UPDATE_NOTIFIER` is set.
 
 ---
 

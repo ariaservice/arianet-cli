@@ -104,10 +104,14 @@ func newSMSCmd() *cobra.Command {
 			path: "/blocked-recipients/{0}", nargs: 1, done: "Number unblocked."}),
 	)
 
-	webhook := subgroup("webhook", "Manage the delivery-report webhook", nil,
+	webhook := subgroup("webhook", "Manage the webhook (batch, delivery and inbound events)", nil,
 		p.command(endpoint{use: "get", aliases: []string{"show"}, short: "Show the webhook URL and its signing secret", method: http.MethodGet, path: "/webhook"}),
 		p.command(endpoint{use: "set", short: "Set the webhook URL (an empty --url turns it off)", method: http.MethodPut, path: "/webhook", done: "Webhook updated.",
-			body: []bodyFlag{{"url", "url", "string", "HTTPS URL that receives delivery reports", true}}}),
+			body: []bodyFlag{
+				{"url", "url", "string", "HTTPS URL that receives the events", true},
+				{"enabled", "enabled", "bool", "turn the webhook on or off", false},
+				{"events", "events", "strings", "per-message events: message.delivered,message.failed,inbound.received (batch.completed is always sent)", false},
+			}}),
 		p.command(endpoint{use: "rotate-secret", short: "Replace the webhook signing secret", method: http.MethodPost, path: "/webhook/secret",
 			confirm: "Replace the webhook signing secret? Your receiver must switch to the new one.", done: "Webhook secret replaced."}),
 	)

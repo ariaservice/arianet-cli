@@ -381,6 +381,51 @@ arianet cloud actions wait <id> [<id>...] [--timeout 30m]
 - Reads that hit the rate limit are retried once the `Retry-After` time has passed
   (when that is at most 30 seconds); changes are never retried automatically.
 
+### Hosting, regional VPS, dedicated servers and SMS
+
+The other products are served by the gateway the same way as the cloud, at
+`<api-url>/hosting/v1`, `/vps/v1`, `/baremetal/v1` and `/sms/v1`. Every command of
+these groups takes `--region <code>` to call one regional install (default: the
+product's default region), and `api <METHOD> <path> [--data JSON]` reaches any
+endpoint the commands do not cover (see `<prefix>/openapi.json`).
+
+```bash
+# Shared hosting (scopes hosting:accounts:read / hosting:accounts:write)
+arianet hosting datacenters | plans [--datacenter <code>] [--kind shared|reseller]
+arianet hosting accounts list|get|usage|nameservers|traffic|actions <id>
+arianet hosting accounts create --datacenter <code> --plan-id <id> --term monthly --domain example.com --password '...'
+arianet hosting accounts delete|renew|login <id> | change-plan <id> --plan-id <id> | password <id> --password '...'
+arianet hosting dns list|add|update|delete <account-id> ...
+arianet hosting email list|add|update|delete <account-id> ...
+arianet hosting databases list|create|delete|grant|users|user-create|user-password|user-delete <account-id> ...
+arianet hosting ssh-keys list|add|delete <account-id> ...
+arianet hosting actions list|get|wait
+
+# Regional VPS, e.g. iran-1 (scopes vps:servers:read / vps:servers:write)
+arianet vps regional datacenters | plans | images
+arianet vps regional servers list|get|delete|start|stop|restart|kill|console|traffic|actions <id>
+arianet vps regional servers create --datacenter <code> --plan-id <id> --image <image> --hostname web-1 --billing-mode hourly [--wait]
+arianet vps regional servers reinstall <id> --image <image> | resize <id> --plan-id <id> | reset-password <id>
+arianet vps regional actions list|get|wait
+
+# Dedicated servers (scopes baremetal:servers:read / baremetal:servers:write)
+arianet baremetal suppliers | ranges | plans | rules | options <catalog> <plan-code>
+arianet baremetal quote --catalog eco --plan-code <code> --datacenter <dc> --memory <m> --storage <s> --bandwidth <b>
+arianet baremetal orders list|get|cancel <id> | create ... --rules-version <v> --accept-rules
+arianet baremetal servers list|get|credentials|renewals|renew|os-templates|reinstall-status <id>
+arianet baremetal servers reinstall <id> --template <os>
+
+# SMS (scopes sms:messages:read|write, sms:lines:read, sms:templates:read|write)
+arianet sms send --line <id> --to 0912... [--to ...] --text "..."
+arianet sms messages list|get | batches list|get | lines list | inbound | scheduled | report
+arianet sms templates list|create|update|delete
+arianet sms blocked list|add|delete
+```
+
+`arianet vps` (without `regional`) keeps managing the original VPS servers of
+`/api/v1/servers`; the regional VPS product has its own API and lives under
+`arianet vps regional`.
+
 ### Balance & Invoices
 
 ```bash

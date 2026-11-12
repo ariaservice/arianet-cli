@@ -34,6 +34,7 @@ func newServerCmd() *cobra.Command {
 		newServiceRenameCmd(),
 		newServiceReinstallCmd(),
 		newServiceProtectCmd(),
+		newVPSRegionalCmd(),
 	)
 	return cmd
 }

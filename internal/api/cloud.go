@@ -33,12 +33,38 @@ var rateLimitSleep = time.Sleep
 // redirect policy and body limit as Client. Its responses are the cloud
 // service's own JSON, not the gateway's {success,data,error} envelope.
 type CloudClient struct {
-	c *Client
+	c       *Client
+	prefix  string
+	headers map[string]string
 }
 
 // Cloud returns the client for the cloud API.
 func (c *Client) Cloud() *CloudClient {
-	return &CloudClient{c: c}
+	return &CloudClient{c: c, prefix: CloudPrefix}
+}
+
+// The other product APIs the gateway serves the same way
+// (arianet-infra-tasks#586): <api_url>/<product>/v1/<path> is the product
+// service's own /v1/<path>, with the service's JSON and error envelope.
+const (
+	HostingPrefix   = "/hosting/v1"
+	VPSPrefix       = "/vps/v1"
+	BaremetalPrefix = "/baremetal/v1"
+	SMSPrefix       = "/sms/v1"
+)
+
+// RegionHeader names the regional install of a product a request is for;
+// without it the gateway uses the product's default install.
+const RegionHeader = "Arianet-Region"
+
+// Product returns a client for a product API at prefix, for one region
+// ("" = the product's default install).
+func (c *Client) Product(prefix, region string) *CloudClient {
+	cc := &CloudClient{c: c, prefix: prefix}
+	if region != "" {
+		cc.headers = map[string]string{RegionHeader: region}
+	}
+	return cc
 }
 
 // CloudPage is one page of a cloud list, from meta.pagination.
@@ -156,7 +182,7 @@ func (cc *CloudClient) Delete(path string, query url.Values, body, out any) erro
 
 // URL is the full address of a cloud API path.
 func (cc *CloudClient) URL(path string, query url.Values) string {
-	u := cc.c.baseURL + CloudPrefix + path
+	u := cc.c.baseURL + cc.prefix + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -213,7 +239,7 @@ func cloudRetryWait(err error, attempt int) (time.Duration, bool) {
 }
 
 func (cc *CloudClient) attempt(method, fullURL string, payload []byte, out any) error {
-	resp, raw, err := cc.c.send(method, fullURL, payload, nil)
+	resp, raw, err := cc.c.send(method, fullURL, payload, cc.headers)
 	if err != nil {
 		return err
 	}

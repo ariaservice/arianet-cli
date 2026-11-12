@@ -120,6 +120,9 @@ func init() {
 		newOSCmd(),
 		newPlanCmd(),
 		newCloudCmd(),
+		newHostingCmd(),
+		newBaremetalCmd(),
+		newSMSCmd(),
 		newVersionCmd(),
 		newUpgradeCmd(),
 	)

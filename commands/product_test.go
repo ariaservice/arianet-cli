@@ -104,16 +104,66 @@ func TestSMSSendBody(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		rec, _ := body["recipients"].([]any)
-		msgs, _ := body["messages"].([]any)
-		if body["sender_line_id"] != float64(3) || len(rec) != 3 || rec[2] != "09130000000" || len(msgs) != 1 || msgs[0] != "Hi, there" {
+		if body["from"] != float64(3) || len(rec) != 3 || rec[2] != "09130000000" || body["body"] != "Hi, there" ||
+			body["client_reference"] != "order-981" || len(body) != 4 {
 			t.Errorf("body %v", body)
 		}
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = io.WriteString(w, `{"data":{"batch_id":91,"total_recipients":3}}`)
+		_, _ = io.WriteString(w, `{"batch_id":"01HX","status":"processing","total_recipients":3,"total_cost_rial":4500,"filtered_blocked_count":0}`)
 	})
-	out := runCaptured(t, newSMSCmd(), "send", "--line", "3", "--to", "09121234567,09351234567", "--to", "09130000000", "--text", "Hi, there")
-	if !strings.Contains(out, `"batch_id": 91`) {
+	out := runCaptured(t, newSMSCmd(), "send", "--from", "3", "--to", "09121234567,09351234567", "--to", "09130000000",
+		"--body", "Hi, there", "--reference", "order-981")
+	if !strings.Contains(out, `"batch_id": "01HX"`) {
 		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestSMSScheduledTemplateSendShowsItsAnswer(t *testing.T) {
+	productTestServer(t, "table", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["template_id"] != float64(7) || body["scheduled_at"] != "2026-12-01T09:00:00+03:30" || body["body"] != nil {
+			t.Errorf("body %v", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"scheduled_id":12,"status":"pending","scheduled_at":"2026-12-01T05:30:00Z"}`)
+	})
+	out := runCaptured(t, newSMSCmd(), "send", "--from", "3", "--to", "09121234567", "--template", "7", "--at", "2026-12-01T09:00:00+03:30")
+	for _, want := range []string{"Message accepted.", "scheduled id", "12", "pending"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSMSListsUsePagesAndFilters(t *testing.T) {
+	productTestServer(t, "table", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/sms/v1/messages" || q.Get("page") != "2" || q.Get("per_page") != "1" || q.Get("status") != "failed" || q.Get("batch_id") != "01HX" {
+			t.Errorf("%s ?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"m1","recipient":"09121234567","sender":"3000","status":"failed","parts":1,"cost_rial":1500}],
+			"meta":{"total":3,"current_page":2,"per_page":1}}`)
+	})
+	out := runCaptured(t, newSMSCmd(), "messages", "list", "--status", "failed", "--batch", "01HX", "--page", "2", "--per-page", "1")
+	for _, want := range []string{"09121234567", "failed", "1500"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSMSTemplateUpdateIsAPut(t *testing.T) {
+	var puts int32
+	productTestServer(t, "table", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/sms/v1/templates/9" {
+			atomic.AddInt32(&puts, 1)
+		}
+		_, _ = io.WriteString(w, `{"data":{"id":9,"name":"otp","body":"Code {code}"}}`)
+	})
+	runCaptured(t, newSMSCmd(), "templates", "update", "9", "--name", "otp", "--body", "Code {code}")
+	if puts != 1 {
+		t.Errorf("puts %d", puts)
 	}
 }
 

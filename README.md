@@ -416,10 +416,15 @@ arianet baremetal servers list|get|credentials|renewals|renew|os-templates|reins
 arianet baremetal servers reinstall <id> --template <os>
 
 # SMS (scopes sms:messages:read|write, sms:lines:read, sms:templates:read|write)
-arianet sms send --line <id> --to 0912... [--to ...] --text "..."
-arianet sms messages list|get | batches list|get | lines list | inbound | scheduled | report
-arianet sms templates list|create|update|delete
+arianet sms send --from <line-id> --to 0912... [--to ...] --body "..." | --template <id> [--at <ISO time>] [--reference <ref>]
+arianet sms messages list [--status s] [--batch id] [--to n] | get <id>
+arianet sms batches list|get | inbound | prices | report [--from day] [--to day]
+arianet sms scheduled list|cancel <id>
+arianet sms lines list|request [--number n] [--note "..."]
+arianet sms templates list|get|create|update|delete
 arianet sms blocked list|add|delete
+arianet sms webhook get|set --url <url>|rotate-secret
+# Lists take --page and --per-page (at most 200).
 ```
 
 `arianet vps` (without `regional`) keeps managing the original VPS servers of

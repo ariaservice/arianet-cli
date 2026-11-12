@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -336,6 +337,9 @@ func printPageFooter(meta map[string]any) {
 	page, _ := strconv.Atoi(cell(firstOf(pg, "page", "current_page")))
 	last, _ := strconv.Atoi(cell(pg["last_page"]))
 	total, _ := strconv.Atoi(cell(firstOf(pg, "total_entries", "total")))
+	if perPage, _ := strconv.Atoi(cell(pg["per_page"])); last == 0 && perPage > 0 {
+		last = (total + perPage - 1) / perPage // {total, current_page, per_page} without last_page
+	}
 	if page > 0 && last > 1 {
 		printer.PaginationFooter(page, last, total, "items")
 	}
@@ -405,6 +409,8 @@ func (p *product) reportChange(cc *api.CloudClient, raw []byte, done string, w w
 	printer.Success(done)
 	if data, ok := resp["data"].(map[string]any); ok && len(data) > 0 {
 		printFields(printer.New(cfg.Output), data, nil)
+	} else if top := topLevelFields(resp); len(top) > 0 {
+		printFields(printer.New(cfg.Output), top, nil)
 	}
 	for _, k := range oneTimeFields {
 		if pw, ok := resp[k].(string); ok && pw != "" {
@@ -418,6 +424,24 @@ func (p *product) reportChange(cc *api.CloudClient, raw []byte, done string, w w
 		}
 	}
 	exitForOutcome(outcome)
+}
+
+// topLevelFields are the scalar fields of an answer that has no "data"
+// object (e.g. SMS send's {"batch_id", "total_cost_rial", ...}), without
+// the action and the one-time fields reportChange prints itself.
+func topLevelFields(resp map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range resp {
+		switch v.(type) {
+		case map[string]any, []any:
+			continue
+		}
+		if k == "data" || k == "action" || k == "actions" || slices.Contains(oneTimeFields, k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // actionState is an action's state ("state" at the product services,

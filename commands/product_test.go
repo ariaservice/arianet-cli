@@ -153,6 +153,32 @@ func TestSMSListsUsePagesAndFilters(t *testing.T) {
 	}
 }
 
+func TestSMSPricesAndReportAreTables(t *testing.T) {
+	productTestServer(t, "table", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sms/v1/prices":
+			_, _ = io.WriteString(w, `{"billing_unit":"message","unit_rial":1750,"tiers":[{"min":1000,"min_parts":1,"unit_rial":1600}]}`)
+		case "/sms/v1/reports/summary":
+			_, _ = io.WriteString(w, `{"from":"2026-11-01","to":"2026-11-02","sent":5,"delivered":4,"failed":1,"pending":0,"parts":6,"spend_rial":8750,
+				"daily":[{"date":"2026-11-02","sent":5,"delivered":4,"failed":1,"spend_rial":8750}]}`)
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+	})
+	out := runCaptured(t, newSMSCmd(), "prices")
+	for _, want := range []string{"Billed per", "message", "Volume tiers", "1600"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prices output lacks %q:\n%s", want, out)
+		}
+	}
+	out = runCaptured(t, newSMSCmd(), "report")
+	for _, want := range []string{"Spend (rial)", "8750", "By day", "2026-11-02"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestSMSTemplateUpdateIsAPut(t *testing.T) {
 	var puts int32
 	productTestServer(t, "table", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {

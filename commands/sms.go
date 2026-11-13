@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/ariaservice/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
 
@@ -121,9 +122,47 @@ func newSMSCmd() *cobra.Command {
 		send, messages, batches, scheduled, lines, templates, blocked, webhook,
 		p.command(endpoint{use: "inbound", short: "List messages received on your lines", method: http.MethodGet, path: "/inbound", query: pageQuery}),
 		p.command(endpoint{use: "report", short: "Show the sending summary (sent, delivered, failed, spend)", method: http.MethodGet, path: "/reports/summary",
-			query: []queryFlag{{"from", "from", "first day, e.g. 2026-11-01"}, {"to", "to", "last day, e.g. 2026-11-30"}}}),
-		p.command(endpoint{use: "prices", short: "Show the price per message and its volume tiers", method: http.MethodGet, path: "/prices"}),
+			query:  []queryFlag{{"from", "from", "first day, e.g. 2026-11-01"}, {"to", "to", "last day, e.g. 2026-11-30"}},
+			render: renderSMSReport}),
+		p.command(endpoint{use: "prices", short: "Show the price per message and its volume tiers", method: http.MethodGet, path: "/prices",
+			render: renderSMSPrices}),
 		p.apiCmd(),
 	)
 	return cmd
+}
+
+// renderSMSPrices shows GET /prices: the billing unit and base price, then the volume tiers.
+func renderSMSPrices(p *printer.Printer, obj map[string]any) {
+	printFields(p, obj, []col{{header: "Billed per", key: "billing_unit"}, {header: "Unit price (rial)", key: "unit_rial"}})
+	tiers := mapsOf(obj["tiers"])
+	if len(tiers) == 0 {
+		return
+	}
+	headers, rows := rowsOf(tiers, []col{{header: "From messages", key: "min"}, {header: "From parts", key: "min_parts"}, {header: "Unit price (rial)", key: "unit_rial"}})
+	p.TableAdvanced("Volume tiers", headers, rows)
+}
+
+// renderSMSReport shows GET /reports/summary: the period totals, then one row per day.
+func renderSMSReport(p *printer.Printer, obj map[string]any) {
+	printFields(p, obj, []col{{header: "From", key: "from"}, {header: "To", key: "to"}, {header: "Sent", key: "sent"},
+		{header: "Delivered", key: "delivered"}, {header: "Failed", key: "failed"}, {header: "Pending", key: "pending"},
+		{header: "Parts", key: "parts"}, {header: "Spend (rial)", key: "spend_rial"}})
+	days := mapsOf(obj["daily"])
+	if len(days) == 0 {
+		return
+	}
+	headers, rows := rowsOf(days, []col{{header: "Date", key: "date"}, {header: "Sent", key: "sent"}, {header: "Delivered", key: "delivered"},
+		{header: "Failed", key: "failed"}, {header: "Spend (rial)", key: "spend_rial"}})
+	p.TableAdvanced("By day", headers, rows)
+}
+
+func mapsOf(v any) []map[string]any {
+	list, _ := v.([]any)
+	out := make([]map[string]any, 0, len(list))
+	for _, it := range list {
+		if m, ok := it.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }

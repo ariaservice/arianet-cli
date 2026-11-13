@@ -91,6 +91,9 @@ type endpoint struct {
 	confirm string // a prompt, with {0}... for the arguments; --yes skips it
 	done    string // what a successful change prints, with {0}...
 	cols    []col  // table columns; nil shows every scalar field
+	// render shows a GET answer that is not a {"data": ...} envelope; nil
+	// falls back to the generic printer.
+	render func(p *printer.Printer, obj map[string]any)
 }
 
 func fill(template string, args []string) string {
@@ -166,6 +169,12 @@ func (p *product) command(e endpoint) *cobra.Command {
 			if err != nil {
 				handleAPIError(err)
 				return nil
+			}
+			if e.method == http.MethodGet && e.render != nil && !jsonMode() {
+				if obj, err := decodeObject(raw); err == nil {
+					e.render(printer.New(cfg.Output), obj)
+					return nil
+				}
 			}
 			if e.method == http.MethodGet {
 				printAnswer(raw, e.cols)

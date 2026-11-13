@@ -13,12 +13,13 @@ import (
 
 var pageQuery = []queryFlag{{"page", "page", "page number"}, {"per-page", "per_page", "items per page (at most 200)"}}
 
-var messageCols = []col{{header: "ID", key: "id"}, {header: "Recipient", key: "recipient"}, {header: "Sender", key: "sender"},
+var messageCols = []col{{header: "ID", key: "id"}, {header: "To", key: "to"}, {header: "From", key: "from"},
 	{header: "Status", key: "status"}, {header: "Parts", key: "parts"}, {header: "Cost (rial)", key: "cost_rial"}, {header: "Sent", key: "sent_at"}}
 
-var batchCols = []col{{header: "ID", key: "id"}, {header: "Status", key: "status"}, {header: "Recipients", key: "total_recipients"},
-	{header: "Delivered", key: "delivered_count"}, {header: "Failed", key: "failed_count"}, {header: "Cost (rial)", key: "total_cost_rial"},
-	{header: "Reference", key: "client_reference"}}
+// Field names as sms-service's /v1 returns them on GET /batches.
+var batchCols = []col{{header: "ID", key: "id"}, {header: "Status", key: "status"}, {header: "From", key: "from"},
+	{header: "Recipients", key: "recipients"}, {header: "Delivered", key: "delivered"}, {header: "Failed", key: "failed"},
+	{header: "Cost (rial)", key: "cost_rial"}, {header: "Created", key: "created_at"}}
 
 func newSMSCmd() *cobra.Command {
 	p := &product{name: "arianet sms", prefix: api.SMSPrefix,

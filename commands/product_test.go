@@ -142,7 +142,7 @@ func TestSMSListsUsePagesAndFilters(t *testing.T) {
 		if r.URL.Path != "/sms/v1/messages" || q.Get("page") != "2" || q.Get("per_page") != "1" || q.Get("status") != "failed" || q.Get("batch_id") != "01HX" {
 			t.Errorf("%s ?%s", r.URL.Path, r.URL.RawQuery)
 		}
-		_, _ = io.WriteString(w, `{"data":[{"id":"m1","recipient":"09121234567","sender":"3000","status":"failed","parts":1,"cost_rial":1500}],
+		_, _ = io.WriteString(w, `{"data":[{"id":"m1","to":"09121234567","from":"3000","status":"failed","parts":1,"cost_rial":1500}],
 			"meta":{"total":3,"current_page":2,"per_page":1}}`)
 	})
 	out := runCaptured(t, newSMSCmd(), "messages", "list", "--status", "failed", "--batch", "01HX", "--page", "2", "--per-page", "1")

@@ -24,6 +24,9 @@ type APIError struct {
 	// Filled in by the client, not part of the wire format.
 	Status     int `json:"-"`
 	RetryAfter int `json:"-"` // seconds, from the Retry-After header
+	// Body is a product API's whole error answer, for the fields beyond
+	// error and code some refusals carry (e.g. the SQL editor's sql_error).
+	Body json.RawMessage `json:"-"`
 }
 
 func (e *APIError) Error() string {

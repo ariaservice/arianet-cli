@@ -123,6 +123,7 @@ func init() {
 		newHostingCmd(),
 		newBaremetalCmd(),
 		newSMSCmd(),
+		newBaaSCmd(),
 		newVersionCmd(),
 		newUpgradeCmd(),
 	)

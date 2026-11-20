@@ -51,6 +51,7 @@ const (
 	VPSPrefix       = "/vps/v1"
 	BaremetalPrefix = "/baremetal/v1"
 	SMSPrefix       = "/sms/v1"
+	BaaSPrefix      = "/baas/v1"
 )
 
 // RegionHeader names the regional install of a product a request is for;
@@ -285,7 +286,7 @@ func cloudError(resp *http.Response, raw []byte) *APIError {
 		return badResponse(resp)
 	}
 
-	out := &APIError{Status: resp.StatusCode, RetryAfter: rateLimitRetryAfter(resp), Code: probe.Code, Reason: probe.Reason}
+	out := &APIError{Status: resp.StatusCode, RetryAfter: rateLimitRetryAfter(resp), Code: probe.Code, Reason: probe.Reason, Body: raw}
 	var text string
 	var nested struct {
 		Code    string `json:"code"`

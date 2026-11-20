@@ -133,9 +133,10 @@ go build -trimpath -o arianet ./cmd/arianet
 - **No telemetry, no analytics, no update checks, no background processes.**
 - Does not execute other programs, does not read your SSH private keys (`ssh add` reads only the
   public key file you point it at), does not modify anything outside its own config file.
-- Writes exactly one file: `config.yaml` in your user config directory, mode `0600` inside a `0700`
-  directory. The API token is the only secret in it. You can avoid the file entirely by using the
-  `ARIANET_TOKEN` environment variable.
+- Writes exactly one file of its own: `config.yaml` in your user config directory, mode `0600` inside
+  a `0700` directory. The API token is the only secret in it. You can avoid the file entirely by
+  using the `ARIANET_TOKEN` environment variable. (`baas db pull` and `baas storage download` write
+  the file you ask them for.)
 - Refuses to send the token over plain `http://` (except to `localhost` for development), refuses
   an API URL that embeds credentials, and does not follow redirects to another host.
 - Strips terminal control characters from anything the server returns before printing it.
@@ -430,6 +431,70 @@ arianet sms webhook get|set --url <url>|rotate-secret
 `arianet vps` (without `regional`) keeps managing the original VPS servers of
 `/api/v1/servers`; the regional VPS product has its own API and lives under
 `arianet vps regional`.
+
+### BaaS (database, auth, storage)
+
+`arianet baas` manages Arianet BaaS projects through `<api-url>/baas/v1`. A project is a
+PostgreSQL database with a public endpoint (REST, auth, storage) and its keys; projects run in
+region `thr-1`. Token scopes: `baas:projects:read` (reads), `baas:projects:manage` (create,
+rename, delete, pause, resume, plan), `baas:keys:manage` (reveal and rotate keys, `env`),
+`baas:sql:execute` (`sql`, `db push`).
+
+```bash
+# Projects
+arianet baas plans
+arianet baas projects list | get <id>
+arianet baas projects create --name shop --plan free [--region thr-1] [--wait]
+arianet baas projects rename <id> --name <name> | pause <id> | resume <id> | plan <id> <plan-code>
+arianet baas projects delete <id> --confirm <ref>        # the ref from "projects get"
+arianet baas actions list|get|wait
+
+# Keys (reveals are recorded in your activity log)
+arianet baas keys list <id>
+arianet baas keys reveal <id> anon|service|publishable|secret|database
+arianet baas keys rotate <id>
+
+# SQL: one transaction, the rows of the last statement that returned rows
+arianet baas sql <id> "select * from todos limit 10"
+arianet baas sql <id> -f report.sql --read-only --json
+
+# Migrations: *.sql files of --dir in name order, tracked in baas_cli.migrations
+arianet baas db push <id> [--dir migrations] [--dry-run]
+arianet baas db pull <id> [--dir migrations | --file -] [--schema public] [--mark-applied]
+
+# TypeScript types (Tables: Row / Insert / Update, Relationships, Views)
+arianet baas types <id> --lang ts [--schema public] > src/database.types.ts
+
+# Environment for your app
+arianet baas env <id> > .env.local          # or --format json
+
+# Storage and end users
+arianet baas storage buckets <id> | buckets create <id> --name avatars [--public] | buckets delete <id> <bucket>
+arianet baas storage ls <id> <bucket> [prefix]
+arianet baas storage upload <id> <bucket> ./me.png [users/42/me.png] [--upsert]
+arianet baas storage download <id> <bucket> users/42/me.png [local-file | -]
+arianet baas storage rm <id> <bucket> <path>...
+arianet baas auth users list|get|create|delete <id> ...
+
+# Logs and use
+arianet baas logs <id> [--source gateway|auth|storage|rest|sql] [--since 1h] [--status 5]
+arianet baas usage <id>
+```
+
+`db push` applies every file not recorded yet, each in its own transaction together with its
+record (name, SHA-256 checksum, time), so a file is applied completely or not at all. A file
+that was applied and changed since is refused: put the change in a new file. Files must not
+contain `BEGIN`/`COMMIT`. `db pull` writes a snapshot of the schema (tables, columns, primary,
+unique, check and foreign keys, indexes, row level security, policies, triggers, comments) as
+`<timestamp>_remote_schema.sql`; `--mark-applied` records it in the project so `db push` skips it.
+
+`env` prints `ARIANET_BAAS_URL` and `ARIANET_BAAS_ANON_KEY` (revealed), plus the same values under
+the public prefixes of common frameworks: `NEXT_PUBLIC_BAAS_URL` / `NEXT_PUBLIC_BAAS_ANON_KEY`
+(Next.js), `VITE_BAAS_*` (Vite), `NUXT_PUBLIC_BAAS_*` (Nuxt) and `EXPO_PUBLIC_BAAS_*` (Expo). Keep
+the lines your app reads; if your code expects other variable names, map them in your `.env`
+(for example `MY_APP_API_URL=$NEXT_PUBLIC_BAAS_URL`) or pass the values to your client library's
+constructor. The anon key is meant for browser code (row level security decides what it reads);
+never put the service or secret key there.
 
 ### Balance & Invoices
 

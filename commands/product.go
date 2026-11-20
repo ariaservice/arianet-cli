@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/ariaservice/arianet-cli/internal/api"
+	"github.com/ariaservice/arianet-cli/internal/config"
 	"github.com/ariaservice/arianet-cli/internal/printer"
 	"github.com/spf13/cobra"
 )
 
 // A product is one of the product APIs the gateway relays like the cloud
-// (/hosting/v1, /vps/v1, /baremetal/v1, /sms/v1). Its commands are built
+// (/hosting/v1, /vps/v1, /baremetal/v1, /sms/v1, /baas/v1). Its commands are built
 // from endpoint descriptions: each is one request, its flags become query
 // parameters or JSON body fields, and its answer ({"data": ...}) is printed
 // as a table or, with -o json, as the service returned it.
@@ -31,6 +32,9 @@ type product struct {
 	// ({"action": {...}}) that GET /actions/{id} follows.
 	actions bool
 	region  string // --region
+	// base, when it returns an address, replaces <api_url><prefix>: the
+	// product's own /v1 reached directly (a local development stack).
+	base func() string
 }
 
 func (p *product) client() *api.CloudClient {
@@ -38,6 +42,16 @@ func (p *product) client() *api.CloudClient {
 	if err != nil {
 		handleAPIError(err)
 		return nil
+	}
+	if p.base != nil {
+		if base := p.base(); base != "" {
+			if err := config.ValidateAPIURL(base); err != nil {
+				handleAPIError(err)
+				return nil
+			}
+			fmt.Fprintf(os.Stderr, "Warning: calling %s directly instead of %s%s\n", base, cfg.APIURL, p.prefix)
+			return client.At(base).Product("", p.region)
+		}
 	}
 	return client.Product(p.prefix, p.region)
 }

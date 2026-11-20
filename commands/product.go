@@ -63,7 +63,7 @@ Add -o json to print the service's answer as is.`,
 type bodyFlag struct {
 	flag     string
 	field    string
-	kind     string // string | int | bool | strings | ints | texts (repeatable, never split)
+	kind     string // string | int | bool | strings | ints | texts (repeatable, never split) | pairs (repeatable name=value, sent as an object)
 	usage    string
 	required bool
 }
@@ -201,6 +201,8 @@ func (p *product) command(e endpoint) *cobra.Command {
 			lists[f.flag] = cmd.Flags().StringArray(f.flag, nil, usage+" (repeatable, or comma separated)")
 		case "texts":
 			lists[f.flag] = cmd.Flags().StringArray(f.flag, nil, usage+" (repeatable)")
+		case "pairs":
+			lists[f.flag] = cmd.Flags().StringArray(f.flag, nil, usage+" (repeatable name=value)")
 		default:
 			strs[f.flag] = cmd.Flags().String(f.flag, "", usage)
 		}
@@ -267,6 +269,16 @@ func buildBody(cmd *cobra.Command, e endpoint, dataJSON, dataFile string,
 			body[f.field] = splitList(*lists[f.flag])
 		case "texts":
 			body[f.field] = *lists[f.flag]
+		case "pairs":
+			pairs := map[string]string{}
+			for _, v := range *lists[f.flag] {
+				name, value, ok := strings.Cut(v, "=")
+				if !ok || strings.TrimSpace(name) == "" {
+					return nil, fmt.Errorf("--%s: %q is not name=value", f.flag, v)
+				}
+				pairs[strings.TrimSpace(name)] = value
+			}
+			body[f.field] = pairs
 		case "ints":
 			var out []int64
 			for _, v := range splitList(*lists[f.flag]) {

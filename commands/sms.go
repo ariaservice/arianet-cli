@@ -25,19 +25,50 @@ var batchCols = []col{{header: "ID", key: "id"}, {header: "Status", key: "status
 func newSMSCmd() *cobra.Command {
 	p := &product{name: "arianet sms", prefix: api.SMSPrefix,
 		scopes: "sms:messages:read, sms:messages:write, sms:lines:read, sms:templates:read, sms:templates:write"}
-	cmd := p.group("sms", "Send SMS and manage lines, templates and blocked recipients",
-		`Send SMS through your sender lines and read what was sent and received.`)
+	cmd := p.group("sms", "Send verification codes and service notices from approved templates",
+		`Send verification codes and service notices to your own users through your sender lines,
+and read what was sent and received. The service carries service messages only: every message
+is an approved template (arianet sms templates create, reviewed within minutes) whose {placeholders}
+are filled with short values (one line, at most 40 characters, no link or phone number). Advertising
+is not accepted. A new account submits its activation request first (arianet sms application submit).`)
 
-	send := p.command(endpoint{use: "send", short: "Send a message to up to 100 recipients, now or at a set time", method: http.MethodPost,
+	application := subgroup("application", "Your activation request: what you send and to whom", []string{"activation"},
+		p.command(endpoint{use: "get", aliases: []string{"show", "status"}, short: "Show whether the account is active and its latest request", method: http.MethodGet, path: "/application"}),
+		p.command(endpoint{use: "submit", short: "Submit the activation request (reviewed before the account can send)", method: http.MethodPost,
+			path: "/application", done: "Activation request submitted; you will be told the answer.",
+			example: `  arianet sms application submit --brand "Acme Shop" --website acme.example --use-case otp --use-case transactional \
+    --description "Login codes and order status messages to customers registered in our shop" --accept-terms`,
+			body: []bodyFlag{
+				{"brand", "brand_name", "string", "brand name that appears in your messages", true},
+				{"website", "website", "string", "your website or app; links in templates may only point there", false},
+				{"use-case", "use_cases", "strings", "otp, transactional or alerts", true},
+				{"description", "description", "string", "what you send, to whom, and why they expect it (at least 20 characters)", true},
+				{"sample", "sample_message", "string", "a sample message", false},
+				{"accept-terms", "accept_terms", "bool", "you send service messages to your own users only, never advertising", true},
+			}}),
+	)
+
+	lookup := p.command(endpoint{use: "lookup", short: "Send an approved template to one recipient (verification codes, notices)", method: http.MethodPost,
+		path: "/verify/lookup", done: "Message accepted.",
+		example: `  arianet sms lookup --to 09121234567 --template login --token code=48213
+  arianet sms lookup --to 09121234567 --template 7 --token order=A-1001 --token date=1405/09/01 --from 3`,
+		body: []bodyFlag{
+			{"to", "receptor", "string", "recipient mobile number", true},
+			{"template", "template", "string", "approved template name or ID", true},
+			{"token", "tokens", "pairs", "value of a {placeholder} of the template", false},
+			{"from", "from", "string", "sender line number or ID; the account's default line when not given", false},
+			{"reference", "client_reference", "string", "your own reference; a send repeated with the same reference is not sent twice", false},
+		}})
+
+	send := p.command(endpoint{use: "send", short: "Send an approved template to up to 100 recipients, now or at a set time", method: http.MethodPost,
 		path: "/messages", rawBody: true, done: "Message accepted.",
-		example: `  arianet sms send --from 3 --to 09121234567 --to 09351234567 --body "Your code is 1234"
-  arianet sms send --from 3 --to 09121234567,09351234567 --template 7 --reference order-981
-  arianet sms send --from 3 --to 09121234567 --body "Reminder" --at 2026-12-01T09:00:00+03:30`,
+		example: `  arianet sms send --from 3 --to 09121234567,09351234567 --template 7 --token order=A-1001 --reference order-981
+  arianet sms send --from 3 --to 09121234567 --template renewal --token date=1405/09/01 --at 2026-12-01T09:00:00+03:30`,
 		body: []bodyFlag{
 			{"from", "from", "int", "sender line ID (arianet sms lines list)", true},
 			{"to", "recipients", "strings", "recipient mobile number, at most 100", true},
-			{"body", "body", "string", "message text (or --template)", false},
-			{"template", "template_id", "int", "template ID to send instead of --body (arianet sms templates list)", false},
+			{"template", "template_id", "string", "approved template ID or name (arianet sms templates list)", true},
+			{"token", "tokens", "pairs", "value of a {placeholder} of the template", false},
 			{"at", "scheduled_at", "string", "send later, at this ISO 8601 time; the send is then listed by arianet sms scheduled list", false},
 			{"reference", "client_reference", "string", "your own reference; a send repeated with the same reference is not sent twice", false},
 		}})
@@ -77,18 +108,23 @@ func newSMSCmd() *cobra.Command {
 	)
 
 	templates := subgroup("templates", "Manage message templates", []string{"template"},
-		p.command(endpoint{use: "list", aliases: []string{"ls"}, short: "List templates", method: http.MethodGet, path: "/templates", query: pageQuery}),
+		p.command(endpoint{use: "list", aliases: []string{"ls"}, short: "List templates and their review status", method: http.MethodGet, path: "/templates", query: pageQuery,
+			cols: []col{{header: "ID", key: "id"}, {header: "Name", key: "name"}, {header: "Category", key: "category"}, {header: "Status", key: "status"}, {header: "Review", key: "review_reason"}}}),
 		p.command(endpoint{use: "get <template-id>", aliases: []string{"show"}, short: "Show one template", method: http.MethodGet,
 			path: "/templates/{0}", nargs: 1}),
-		p.command(endpoint{use: "create", short: "Create a template", method: http.MethodPost, path: "/templates", done: "Template created.",
+		p.command(endpoint{use: "create", short: "Create a template (sent for review; usable once approved)", method: http.MethodPost, path: "/templates",
+			done:    "Template created and sent for review.",
+			example: `  arianet sms templates create --name login --category otp --body "Your Acme login code: {code}"`,
 			body: []bodyFlag{
 				{"name", "name", "string", "template name, unique in your account", true},
-				{"body", "body", "string", "template text", true},
+				{"body", "body", "string", "template text; variable parts are written {name} (lower-case letters, digits, _)", true},
+				{"category", "category", "string", "otp or transactional (default transactional)", false},
 			}}),
-		p.command(endpoint{use: "update <template-id>", short: "Replace a template's name and text", method: http.MethodPut, path: "/templates/{0}", nargs: 1,
+		p.command(endpoint{use: "update <template-id>", short: "Replace a template's name and text (a changed text is reviewed again)", method: http.MethodPut, path: "/templates/{0}", nargs: 1,
 			done: "Template #{0} updated.", body: []bodyFlag{
 				{"name", "name", "string", "template name", true},
 				{"body", "body", "string", "template text", true},
+				{"category", "category", "string", "otp or transactional", false},
 			}}),
 		p.command(endpoint{use: "delete <template-id>", aliases: []string{"rm"}, short: "Delete a template", method: http.MethodDelete,
 			path: "/templates/{0}", nargs: 1, confirm: "Delete template #{0}?", done: "Template #{0} deleted."}),
@@ -119,7 +155,7 @@ func newSMSCmd() *cobra.Command {
 	)
 
 	cmd.AddCommand(
-		send, messages, batches, scheduled, lines, templates, blocked, webhook,
+		application, lookup, send, messages, batches, scheduled, lines, templates, blocked, webhook,
 		p.command(endpoint{use: "inbound", short: "List messages received on your lines", method: http.MethodGet, path: "/inbound", query: pageQuery}),
 		p.command(endpoint{use: "report", short: "Show the sending summary (sent, delivered, failed, spend)", method: http.MethodGet, path: "/reports/summary",
 			query:  []queryFlag{{"from", "from", "first day, e.g. 2026-11-01"}, {"to", "to", "last day, e.g. 2026-11-30"}},

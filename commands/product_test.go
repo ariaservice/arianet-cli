@@ -96,7 +96,7 @@ func TestHostingDNSAddBody(t *testing.T) {
 	runCaptured(t, newHostingCmd(), "dns", "add", "12", "--type", "A", "--name", "www", "--content", "203.0.113.10", "--ttl", "300")
 }
 
-func TestSMSSendBody(t *testing.T) {
+func TestSMSSendTemplateWithTokens(t *testing.T) {
 	productTestServer(t, "json", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/sms/v1/messages" {
 			t.Errorf("%s %s", r.Method, r.URL.Path)
@@ -104,16 +104,45 @@ func TestSMSSendBody(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		rec, _ := body["recipients"].([]any)
-		if body["from"] != float64(3) || len(rec) != 3 || rec[2] != "09130000000" || body["body"] != "Hi, there" ||
-			body["client_reference"] != "order-981" || len(body) != 4 {
+		tokens, _ := body["tokens"].(map[string]any)
+		if body["from"] != float64(3) || len(rec) != 3 || rec[2] != "09130000000" || body["template_id"] != "order-shipped" ||
+			tokens["order"] != "A-1001" || tokens["date"] != "1405/09/01=x" || body["client_reference"] != "order-981" || len(body) != 5 {
 			t.Errorf("body %v", body)
 		}
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = io.WriteString(w, `{"batch_id":"01HX","status":"processing","total_recipients":3,"total_cost_rial":4500,"filtered_blocked_count":0}`)
 	})
 	out := runCaptured(t, newSMSCmd(), "send", "--from", "3", "--to", "09121234567,09351234567", "--to", "09130000000",
-		"--body", "Hi, there", "--reference", "order-981")
+		"--template", "order-shipped", "--token", "order=A-1001", "--token", "date=1405/09/01=x", "--reference", "order-981")
 	if !strings.Contains(out, `"batch_id": "01HX"`) {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestSMSSendHasNoFreeText(t *testing.T) {
+	cmd := newSMSCmd()
+	send, _, err := cmd.Find([]string{"send"})
+	if err != nil || send.Flags().Lookup("body") != nil || send.Flags().Lookup("template") == nil {
+		t.Fatalf("send must take an approved template, not --body (err %v)", err)
+	}
+}
+
+func TestSMSLookupSendsOneTemplate(t *testing.T) {
+	productTestServer(t, "json", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/sms/v1/verify/lookup" {
+			t.Errorf("%s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		tokens, _ := body["tokens"].(map[string]any)
+		if body["receptor"] != "09121234567" || body["template"] != "login" || tokens["code"] != "48213" || len(body) != 3 {
+			t.Errorf("body %v", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"message_id":5,"status":"queued"}`)
+	})
+	out := runCaptured(t, newSMSCmd(), "lookup", "--to", "09121234567", "--template", "login", "--token", "code=48213")
+	if !strings.Contains(out, `"message_id": 5`) {
 		t.Errorf("output:\n%s", out)
 	}
 }
@@ -122,7 +151,7 @@ func TestSMSScheduledTemplateSendShowsItsAnswer(t *testing.T) {
 	productTestServer(t, "table", api.SMSPrefix, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["template_id"] != float64(7) || body["scheduled_at"] != "2026-12-01T09:00:00+03:30" || body["body"] != nil {
+		if body["template_id"] != "7" || body["scheduled_at"] != "2026-12-01T09:00:00+03:30" || body["body"] != nil {
 			t.Errorf("body %v", body)
 		}
 		w.WriteHeader(http.StatusAccepted)

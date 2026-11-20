@@ -48,7 +48,8 @@ func newBaaSCmd() *cobra.Command {
 	var apiBase string
 	p := &product{name: "arianet baas", prefix: api.BaaSPrefix, actions: true,
 		scopes: "baas:projects:read (reads), baas:projects:manage (create, rename, delete, pause, resume, plan), " +
-			"baas:keys:manage (keys reveal and rotate, env), baas:sql:execute (sql, db push)",
+			"baas:keys:manage (keys reveal and rotate, env), baas:sql:execute (sql, db push), " +
+			"baas:storage:manage (storage writes), baas:auth-users:manage (auth users create and delete)",
 		base: func() string {
 			if apiBase != "" {
 				return apiBase

@@ -432,13 +432,15 @@ arianet sms webhook get|set --url <url>|rotate-secret
 `/api/v1/servers`; the regional VPS product has its own API and lives under
 `arianet vps regional`.
 
-### BaaS (database, auth, storage)
+### BaaS (database, auth, storage, edge functions)
 
 `arianet baas` manages Arianet BaaS projects through `<api-url>/baas/v1`. A project is a
 PostgreSQL database with a public endpoint (REST, auth, storage) and its keys; projects run in
 region `thr-1`. Token scopes: `baas:projects:read` (reads), `baas:projects:manage` (create,
 rename, delete, pause, resume, plan), `baas:keys:manage` (reveal and rotate keys, `env`),
-`baas:sql:execute` (`sql`, `db push`).
+`baas:sql:execute` (`sql`, `db push`), `baas:storage:manage` (storage writes),
+`baas:auth-users:manage` (auth users create and delete), `baas:functions:manage` (functions
+deploy, delete, download and secrets changes).
 
 ```bash
 # Projects
@@ -476,6 +478,16 @@ arianet baas storage download <id> <bucket> users/42/me.png [local-file | -]
 arianet baas storage rm <id> <bucket> <path>...
 arianet baas auth users list|get|create|delete <id> ...
 
+# Edge functions: code in arianet/functions/<name>/index.ts, shared code in arianet/functions/_shared/
+arianet baas functions new hello-world
+arianet baas functions serve [hello-world] [--env-file arianet/functions/.env] [--port 8000]   # needs Deno
+arianet baas functions deploy <id> [name...] [--no-verify-jwt | --verify-jwt]   # no name: every function
+arianet baas functions list <id> | get <id> <name> | delete <id> <name>
+arianet baas functions download <id> <name> [--version 2] [--force]
+arianet baas functions secrets list <id>
+arianet baas functions secrets set <id> STRIPE_KEY=sk_live_123 [--env-file .env]
+arianet baas functions secrets unset <id> STRIPE_KEY
+
 # Logs and use
 arianet baas logs <id> [--source gateway|auth|storage|rest|sql] [--since 1h] [--status 5]
 arianet baas usage <id>
@@ -495,6 +507,15 @@ the lines your app reads; if your code expects other variable names, map them in
 (for example `MY_APP_API_URL=$NEXT_PUBLIC_BAAS_URL`) or pass the values to your client library's
 constructor. The anon key is meant for browser code (row level security decides what it reads);
 never put the service or secret key there.
+
+`functions deploy` zips `arianet/functions/<name>/` (at `<name>/...`) with every folder whose
+name starts with `_` (shared code), leaving out dotfiles and `node_modules`, and uploads it as
+the function's new active version; the entrypoint is `<name>/index.ts` (or `.js`, `.mjs`,
+`.tsx`, `.jsx`). A function answers at `https://<ref>.baas.arianet.app/functions/v1/<name>` and
+by default needs a project JWT (`--no-verify-jwt` for webhooks). Functions get
+`ARIANET_BAAS_URL`, `ARIANET_BAAS_ANON_KEY`, `ARIANET_BAAS_DB_URL` and the project's secrets as
+environment variables. Limits (number of functions, bundle size, invocations a month) come
+from the plan and are shown by `functions list`.
 
 ### Balance & Invoices
 

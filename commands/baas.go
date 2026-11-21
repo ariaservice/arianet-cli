@@ -49,17 +49,18 @@ func newBaaSCmd() *cobra.Command {
 	p := &product{name: "arianet baas", prefix: api.BaaSPrefix, actions: true,
 		scopes: "baas:projects:read (reads), baas:projects:manage (create, rename, delete, pause, resume, plan), " +
 			"baas:keys:manage (keys reveal and rotate, env), baas:sql:execute (sql, db push), " +
-			"baas:storage:manage (storage writes), baas:auth-users:manage (auth users create and delete)",
+			"baas:storage:manage (storage writes), baas:auth-users:manage (auth users create and delete), " +
+			"baas:functions:manage (functions deploy, delete, download and secrets changes)",
 		base: func() string {
 			if apiBase != "" {
 				return apiBase
 			}
 			return os.Getenv(EnvBaaSAPIBase)
 		}}
-	cmd := p.group("baas", "Manage BaaS projects: database, SQL, migrations, keys, storage and auth users",
+	cmd := p.group("baas", "Manage BaaS projects: database, SQL, migrations, keys, storage, auth users and edge functions",
 		`Arianet BaaS: each project is a PostgreSQL database with a public endpoint (REST, auth,
 storage) and its keys. Create and manage projects, run SQL, apply migrations from files,
-generate TypeScript types, and print the environment your app needs.
+generate TypeScript types, deploy edge functions, and print the environment your app needs.
 
 Projects run in region thr-1.`)
 	cmd.PersistentFlags().StringVar(&apiBase, "api-base", "", "call this BaaS /v1 address directly instead of the gateway (development)")
@@ -136,6 +137,7 @@ Projects run in region thr-1.`)
 		p.baasEnvCmd(),
 		p.baasStorageCmd(),
 		auth,
+		p.baasFunctionsCmd(),
 		p.baasLogsCmd(),
 		p.command(endpoint{use: "usage <project-id>", short: "Show this month's use against the plan", method: http.MethodGet,
 			path: "/projects/{0}/usage", nargs: 1, render: renderBaaSUsage}),

@@ -436,11 +436,17 @@ arianet sms webhook get|set --url <url>|rotate-secret
 
 `arianet baas` manages Arianet BaaS projects through `<api-url>/baas/v1`. A project is a
 PostgreSQL database with a public endpoint (REST, auth, storage) and its keys; projects run in
-region `thr-1`. Token scopes: `baas:projects:read` (reads), `baas:projects:manage` (create,
-rename, delete, pause, resume, plan), `baas:keys:manage` (reveal and rotate keys, `env`),
-`baas:sql:execute` (`sql`, `db push`), `baas:storage:manage` (storage writes),
-`baas:auth-users:manage` (auth users create and delete), `baas:functions:manage` (functions
-deploy, delete, download and secrets changes).
+region `thr-1`. Token scopes: `baas:projects:read` (reads, including `migration list`, `db pull`,
+`db diff`, `gen types`, `advisors`), `baas:projects:manage` (create, rename, delete, pause, resume,
+plan, `domains`, `transfer`, `api-settings set`), `baas:keys:manage` (reveal and rotate keys,
+`env`), `baas:sql:execute` (`sql`, `db push`, `db pull --mark-applied`), `baas:storage:manage`
+(storage writes), `baas:auth-users:manage` (auth users create and delete), `baas:functions:manage`
+(functions deploy, delete, download and secrets changes).
+
+Run `arianet baas link` once in your app's directory: it writes `arianet/.baas/project.json`
+(project ID, ref, name, endpoint, region; no secret) and every command below that takes the
+project ID as its first argument uses the linked project when the ID is left out. An explicit
+ID still wins; `arianet baas unlink` removes the link.
 
 ```bash
 # Projects
@@ -451,6 +457,10 @@ arianet baas projects rename <id> --name <name> | pause <id> | resume <id> | pla
 arianet baas projects delete <id> --confirm <ref>        # the ref from "projects get"
 arianet baas actions list|get|wait
 
+# Link this directory to a project (then <id> can be left out)
+arianet baas link [<id> | <ref>]
+arianet baas unlink
+
 # Keys (reveals are recorded in your activity log)
 arianet baas keys list <id>
 arianet baas keys reveal <id> anon|service|publishable|secret|database
@@ -460,12 +470,16 @@ arianet baas keys rotate <id>
 arianet baas sql <id> "select * from todos limit 10"
 arianet baas sql <id> -f report.sql --read-only --json
 
-# Migrations: *.sql files of --dir in name order, tracked in baas_cli.migrations
-arianet baas db push <id> [--dir migrations] [--dry-run]
-arianet baas db pull <id> [--dir migrations | --file -] [--schema public] [--mark-applied]
+# Migrations: *.sql files of arianet/migrations in name order, tracked in baas_cli.migrations
+arianet baas migration new create_todos                 # arianet/migrations/<UTC timestamp>_create_todos.sql
+arianet baas migration list <id>                        # applied | pending | changed | remote only
+arianet baas db push <id> [--dir arianet/migrations] [--dry-run]
+arianet baas db pull <id> [--dir arianet/migrations | --file -] [--schema public,app] [--mark-applied]
+arianet baas db diff <id> [--against schema.sql]        # exit 0: no difference, 2: differences
 
-# TypeScript types (Tables: Row / Insert / Update, Relationships, Views)
-arianet baas types <id> --lang ts [--schema public] > src/database.types.ts
+# TypeScript types (Tables: Row / Insert / Update, Relationships, Views, Functions, Enums)
+arianet baas gen types <id> --lang typescript [--schema public] [--file src/database.types.ts]
+arianet baas types <id> > src/database.types.ts         # alias of gen types
 
 # Environment for your app
 arianet baas env <id> > .env.local          # or --format json
@@ -491,14 +505,27 @@ arianet baas functions secrets unset <id> STRIPE_KEY
 # Logs and use
 arianet baas logs <id> [--source gateway|auth|storage|rest|sql] [--since 1h] [--status 5]
 arianet baas usage <id>
+
+# Advisors, custom domains, transfer, API settings
+arianet baas advisors <id> [--kind security|performance] [--run] [--details]
+arianet baas domains list <id> | add <id> api.example.com | check <id> <domain-id> | remove <id> <domain-id>
+arianet baas transfer <id> --to <account-id> --confirm <ref> | transfer status|cancel <id>
+arianet baas transfer list [--direction incoming|outgoing] | accept|decline <transfer-id>
+arianet baas api-settings get <id> | set <id> [--max-rows 500] [--jwt-expiry 7200]
 ```
 
-`db push` applies every file not recorded yet, each in its own transaction together with its
-record (name, SHA-256 checksum, time), so a file is applied completely or not at all. A file
-that was applied and changed since is refused: put the change in a new file. Files must not
-contain `BEGIN`/`COMMIT`. `db pull` writes a snapshot of the schema (tables, columns, primary,
-unique, check and foreign keys, indexes, row level security, policies, triggers, comments) as
-`<timestamp>_remote_schema.sql`; `--mark-applied` records it in the project so `db push` skips it.
+`db push` sends every file to the project, which applies the ones not recorded yet in one
+transaction, each followed by its record (name, SHA-256 checksum, time): if one fails nothing is
+applied and the failing file is named. A file that was applied and changed since is refused: put
+the change in a new file. Files must not contain `BEGIN`/`COMMIT`. `db pull` writes the project's
+DDL (extensions, enums, sequences, tables, indexes, views, functions, triggers, row level
+security, policies, comments) as `arianet/migrations/<timestamp>_remote_schema.sql`;
+`--mark-applied` records it in the project so `db push` skips it. `db diff` compares the files
+with the project's history and the project's schema now with the newest snapshot (a unified
+diff); it exits 2 when there is a difference, for CI. A directory that still has `./migrations`
+and no `./arianet/migrations` keeps using it (with a note). In a region that does not have the
+migrations, schema or types endpoints yet, these commands fall back to the SQL endpoint and the
+table introspection (one transaction per file; tables only).
 
 `env` prints `ARIANET_BAAS_URL` and `ARIANET_BAAS_ANON_KEY` (revealed), plus the same values under
 the public prefixes of common frameworks: `NEXT_PUBLIC_BAAS_URL` / `NEXT_PUBLIC_BAAS_ANON_KEY`

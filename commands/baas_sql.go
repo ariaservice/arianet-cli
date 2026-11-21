@@ -173,7 +173,7 @@ func (p *product) baasSQLCmd() *cobra.Command {
 	var file string
 	var readOnly, asJSON bool
 	cmd := &cobra.Command{
-		Use:   "sql <project-id> [query]",
+		Use:   "sql [project-id] [query]",
 		Short: "Run SQL as the project's owner (one transaction) and print the result",
 		Long: `Run SQL as the project's owner: every statement in one transaction (no BEGIN or COMMIT
 inside), a 15 second statement timeout (the plan's when longer). Prints the rows of the last
@@ -182,12 +182,13 @@ recorded in your activity log. Needs the baas:sql:execute scope.`,
 		Example: `  arianet baas sql 12 "select id, title from todos limit 5"
   arianet baas sql 12 -f seed.sql
   cat report.sql | arianet baas sql 12 -f - --read-only --json`,
-		Args: cobra.RangeArgs(1, 2),
+		Args: projectArgsRange(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 0, 1)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			var query string
 			switch {
 			case file != "" && len(args) == 2:
@@ -344,162 +345,100 @@ func migrationNames(files []migrationFile) []string {
 	return out
 }
 
-func (p *product) baasDBCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "db", Short: "Apply migration files to the database, or write its schema to a file"}
-	cmd.AddCommand(p.baasDBPushCmd(), p.baasDBPullCmd())
-	return cmd
-}
+// pushViaSQL is db push for a region without the migrations endpoint:
+// the tracking table is read and written through the SQL endpoint and each
+// file runs in its own transaction together with its record.
+func pushViaSQL(cc *api.CloudClient, id, dir string, files []migrationFile, dryRun bool) error {
+	applied, err := appliedMigrations(cc, id, dryRun)
+	if err != nil {
+		handleSQLError(err)
+		return nil
+	}
+	pending, done, edited, remoteOnly := pushPlan(files, applied)
+	if len(edited) > 0 {
+		return fmt.Errorf("these files were applied and have changed since: %s\nnothing was applied; put the change in a new migration file",
+			strings.Join(migrationNames(edited), ", "))
+	}
+	for _, name := range remoteOnly {
+		fmt.Fprintf(os.Stderr, "Warning: %s is recorded as applied but is not in %s\n", name, dir)
+	}
 
-func (p *product) baasDBPushCmd() *cobra.Command {
-	var dir string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "push <project-id>",
-		Short: "Apply the migration files (*.sql) not applied yet, in name order",
-		Long: `Apply every *.sql file of --dir that the project has not recorded yet, in lexical name
-order (name them e.g. 20261121093000_create_todos.sql). Each file runs in its own transaction
-together with its record in baas_cli.migrations (name, checksum, applied_at), so a file is
-applied completely or not at all. A file that was applied and has changed since is refused:
-put the change in a new migration file. Files must not contain BEGIN or COMMIT. Needs
-the baas:sql:execute scope.`,
-		Example: `  arianet baas db push 12
-  arianet baas db push 12 --dir db/migrations --dry-run`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
-			if err != nil {
-				return err
-			}
-			files, err := readMigrations(dir)
-			if err != nil {
-				return err
-			}
-			cc := p.client()
-			if cc == nil {
-				return nil
-			}
-			applied, err := appliedMigrations(cc, id, dryRun)
-			if err != nil {
-				handleSQLError(err)
-				return nil
-			}
-			pending, done, edited, remoteOnly := pushPlan(files, applied)
-			if len(edited) > 0 {
-				return fmt.Errorf("these files were applied and have changed since: %s\nnothing was applied; put the change in a new migration file",
-					strings.Join(migrationNames(edited), ", "))
-			}
-			for _, name := range remoteOnly {
-				fmt.Fprintf(os.Stderr, "Warning: %s is recorded as applied but is not in %s\n", name, dir)
-			}
-
-			result := map[string]any{"dry_run": dryRun, "already_applied": migrationNames(done), "pending": migrationNames(pending), "applied": []string{}}
-			if dryRun || len(pending) == 0 {
-				switch {
-				case jsonMode():
-					printer.New("json").PrintJSON(result)
-				case len(pending) == 0:
-					printer.Success(fmt.Sprintf("The database is up to date (%d migration(s) applied).", len(done)))
-				default:
-					printer.Info(fmt.Sprintf("Would apply %d migration(s):", len(pending)))
-					for _, f := range pending {
-						printer.Info("  " + f.Name)
-					}
-				}
-				return nil
-			}
-
-			appliedNow := []string{}
+	result := map[string]any{"dry_run": dryRun, "already_applied": migrationNames(done), "pending": migrationNames(pending), "applied": []string{}}
+	if dryRun || len(pending) == 0 {
+		switch {
+		case jsonMode():
+			printer.New("json").PrintJSON(result)
+		case len(pending) == 0:
+			printer.Success(fmt.Sprintf("The database is up to date (%d migration(s) applied).", len(done)))
+		default:
+			printer.Info(fmt.Sprintf("Would apply %d migration(s):", len(pending)))
 			for _, f := range pending {
-				res, _, err := runBaaSSQL(cc, id, f.text+"\n;\n"+recordMigration(f), false)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Applying %s failed and was rolled back (%d migration(s) before it were applied).\n", f.Name, len(appliedNow))
-					handleSQLError(err)
-					return nil
-				}
-				appliedNow = append(appliedNow, f.Name)
-				if !jsonMode() {
-					printer.Info(fmt.Sprintf("Applied %s (%d statement(s), %d ms)", f.Name, len(res.Statements)-1, res.DurationMS))
-				}
+				printer.Info("  " + f.Name)
 			}
-			if jsonMode() {
-				result["applied"] = appliedNow
-				printer.New("json").PrintJSON(result)
-				return nil
-			}
-			printer.Success(fmt.Sprintf("Applied %d migration(s).", len(appliedNow)))
-			return nil
-		},
+		}
+		return nil
 	}
-	cmd.Flags().StringVar(&dir, "dir", "migrations", "directory of the migration files")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list what would be applied; change nothing")
-	return cmd
+
+	appliedNow := []string{}
+	for _, f := range pending {
+		res, _, err := runBaaSSQL(cc, id, f.text+"\n;\n"+recordMigration(f), false)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Applying %s failed and was rolled back (%d migration(s) before it were applied).\n", f.Name, len(appliedNow))
+			handleSQLError(err)
+			return nil
+		}
+		appliedNow = append(appliedNow, f.Name)
+		if !jsonMode() {
+			printer.Info(fmt.Sprintf("Applied %s (%d statement(s), %d ms)", f.Name, len(res.Statements)-1, res.DurationMS))
+		}
+	}
+	if jsonMode() {
+		result["applied"] = appliedNow
+		printer.New("json").PrintJSON(result)
+		return nil
+	}
+	printer.Success(fmt.Sprintf("Applied %d migration(s).", len(appliedNow)))
+	return nil
 }
 
-func (p *product) baasDBPullCmd() *cobra.Command {
-	var dir, file, schema string
-	var markApplied bool
-	cmd := &cobra.Command{
-		Use:   "pull <project-id>",
-		Short: "Write the schema (tables, keys, indexes, row level security, policies) as a SQL file",
-		Long: `Write a SQL snapshot of one schema of the project's database (default public): its tables
-with their columns, primary, unique, check and foreign keys, indexes, row level security,
-policies, triggers and comments. The file goes to --dir as <timestamp>_remote_schema.sql (or
-to --file, - for standard output).
+// markApplied records a file as applied without running it.
+func markApplied(cc *api.CloudClient, id string, m migrationFile) error {
+	_, _, err := runBaaSSQL(cc, id, baasMigrationsDDL+";\n"+recordMigration(m), false)
+	return err
+}
 
-The snapshot describes the database as it is, so db push would fail applying it to the same
-project: --mark-applied records it as applied there (needs baas:sql:execute). Views are listed
-but not written (their definition is not part of the table introspection), and the functions
-that triggers call are not included.`,
-		Example: `  arianet baas db pull 12
-  arianet baas db pull 12 --file - > schema.sql`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
-			if err != nil {
-				return err
-			}
-			cc := p.client()
-			if cc == nil {
-				return nil
-			}
-			tables, err := fetchBaaSTables(cc, id, schema)
-			if err != nil {
-				handleAPIError(err)
-				return nil
-			}
-			now := time.Now().UTC()
-			text := schemaSQL(id, schema, tables, now)
-			if file == "-" {
-				fmt.Print(text)
-				return nil
-			}
-			path := file
-			if path == "" {
-				if err := os.MkdirAll(dir, 0o755); err != nil {
-					return err
-				}
-				path = filepath.Join(dir, now.Format("20060102150405")+"_remote_schema.sql")
-			}
-			if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-				return err
-			}
-			fmt.Fprintf(os.Stderr, "Wrote the schema of %d table(s) to %s\n", len(tables), path)
-			if markApplied {
-				m := migrationFile{Name: filepath.Base(path), Checksum: checksum([]byte(text))}
-				if _, _, err := runBaaSSQL(cc, id, baasMigrationsDDL+";\n"+recordMigration(m), false); err != nil {
-					handleSQLError(err)
-					return nil
-				}
-				fmt.Fprintf(os.Stderr, "Recorded %s as applied.\n", m.Name)
-			}
-			return nil
-		},
+// schemaSQLViaTables is db pull's snapshot built here from the table
+// introspection, for a region without the schema endpoint.
+func schemaSQLViaTables(cc *api.CloudClient, id string, schemas []string, at time.Time) (string, error) {
+	var b strings.Builder
+	for i, s := range schemas {
+		tables, err := fetchBaaSTables(cc, id, s)
+		if err != nil {
+			return "", err
+		}
+		text := schemaSQL(id, s, tables, at)
+		if i > 0 {
+			// One header for the whole file.
+			text = strings.TrimLeft(stripLeadingComments(text), "\n")
+			b.WriteString("\n")
+		}
+		b.WriteString(text)
 	}
-	cmd.Flags().StringVar(&dir, "dir", "migrations", "directory to write the snapshot into")
-	cmd.Flags().StringVar(&file, "file", "", "write to this file instead (- for standard output)")
-	cmd.Flags().StringVar(&schema, "schema", "public", "the schema to write")
-	cmd.Flags().BoolVar(&markApplied, "mark-applied", false, "record the snapshot as applied in the project, so db push skips it")
-	return cmd
+	return b.String(), nil
+}
+
+// typesViaTables is the TypeScript generated here from the table
+// introspection, for a region without the types endpoint.
+func typesViaTables(cc *api.CloudClient, id string, schemas []string) (string, error) {
+	bySchema := map[string][]baasTable{}
+	for _, s := range schemas {
+		tables, err := fetchBaaSTables(cc, id, s)
+		if err != nil {
+			return "", err
+		}
+		bySchema[s] = tables
+	}
+	return typescriptTypes(schemas, bySchema), nil
 }
 
 // ─── table introspection ─────────────────────────────────────────────────────
@@ -763,53 +702,6 @@ func schemaSQL(id, schema string, tables []baasTable, at time.Time) string {
 }
 
 // ─── types ───────────────────────────────────────────────────────────────────
-
-func (p *product) baasTypesCmd() *cobra.Command {
-	var lang string
-	var schemas []string
-	cmd := &cobra.Command{
-		Use:   "types <project-id>",
-		Short: "Generate TypeScript types of the database (Tables: Row, Insert, Update)",
-		Long: `Generate a TypeScript Database type from the project's tables: per schema, Tables with
-Row (what a select returns), Insert (columns with a default, an identity or NULL allowed are
-optional) and Update (every column optional), Relationships from the foreign keys, and Views.
-Pass it to a typed client library as its database type parameter.`,
-		Example: `  arianet baas types 12 --lang ts > src/database.types.ts
-  arianet baas types 12 --schema public,app > types.ts`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
-			if err != nil {
-				return err
-			}
-			if lang != "ts" && lang != "typescript" {
-				return fmt.Errorf("--lang %q is not supported; use ts", lang)
-			}
-			list := splitList(schemas)
-			if len(list) == 0 {
-				list = []string{"public"}
-			}
-			cc := p.client()
-			if cc == nil {
-				return nil
-			}
-			bySchema := map[string][]baasTable{}
-			for _, s := range list {
-				tables, err := fetchBaaSTables(cc, id, s)
-				if err != nil {
-					handleAPIError(err)
-					return nil
-				}
-				bySchema[s] = tables
-			}
-			fmt.Print(typescriptTypes(list, bySchema))
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&lang, "lang", "ts", "output language: ts")
-	cmd.Flags().StringSliceVar(&schemas, "schema", []string{"public"}, "schemas to include (repeatable or comma separated)")
-	return cmd
-}
 
 var (
 	typeModifier = regexp.MustCompile(`\([^)]*\)`)

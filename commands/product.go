@@ -35,6 +35,10 @@ type product struct {
 	// base, when it returns an address, replaces <api_url><prefix>: the
 	// product's own /v1 reached directly (a local development stack).
 	base func() string
+	// linkProject is true when a directory can be linked to a project
+	// (arianet baas link): the project ID, the first argument of every
+	// /projects/{0}... endpoint, may then be left out.
+	linkProject bool
 }
 
 func (p *product) client() *api.CloudClient {
@@ -129,6 +133,7 @@ func (p *product) command(e endpoint) *cobra.Command {
 	bools := map[string]*bool{}
 	lists := map[string]*[]string{}
 
+	projectFirst := p.linkProject && e.nargs > 0 && strings.HasPrefix(e.path, "/projects/{0}")
 	cmd := &cobra.Command{
 		Use:     e.use,
 		Aliases: e.aliases,
@@ -136,6 +141,13 @@ func (p *product) command(e endpoint) *cobra.Command {
 		Example: e.example,
 		Args:    cobra.ExactArgs(e.nargs),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if projectFirst {
+				id, rest, err := splitProject(args, e.nargs-1, e.nargs-1)
+				if err != nil {
+					return err
+				}
+				args = append([]string{id}, rest...)
+			}
 			escaped := make([]string, len(args))
 			for i, a := range args {
 				a = strings.TrimSpace(a)
@@ -197,6 +209,10 @@ func (p *product) command(e endpoint) *cobra.Command {
 			p.reportChange(cc, raw, fill(e.done, args), w)
 			return nil
 		},
+	}
+	if projectFirst {
+		cmd.Use = optionalProjectUse(cmd.Use)
+		cmd.Args = projectArgsRange(e.nargs-1, e.nargs-1)
 	}
 	for _, f := range e.query {
 		strs["q:"+f.flag] = cmd.Flags().String(f.flag, "", f.usage)

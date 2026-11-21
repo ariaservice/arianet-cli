@@ -536,15 +536,16 @@ func renderFunctionsList(raw []byte) {
 
 func (p *product) baasFunctionsListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "list <project-id>",
+		Use:     "list [project-id]",
 		Aliases: []string{"ls"},
 		Short:   "List the project's functions with the plan's limits and this month's use",
-		Args:    cobra.ExactArgs(1),
+		Args:    projectArgsRange(0, 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 0, 0)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			cc := p.client()
 			if cc == nil {
 				return nil
@@ -563,7 +564,7 @@ func (p *product) baasFunctionsListCmd() *cobra.Command {
 func (p *product) baasFunctionsDeployCmd(dirOf func() string) *cobra.Command {
 	var noVerifyJWT, verifyJWT bool
 	cmd := &cobra.Command{
-		Use:   "deploy <project-id> [name...]",
+		Use:   "deploy [project-id] [name...]",
 		Short: "Bundle and deploy functions (every function folder when no name is given)",
 		Long: `Zip ` + defaultFunctionsDir + `/<name>/ (at <name>/...) together with every folder whose name starts
 with _ (shared code, e.g. _shared/), and deploy it as the function's new active version. The
@@ -574,12 +575,13 @@ existing function keeps its setting. Needs the baas:functions:manage scope.`,
 		Example: `  arianet baas functions deploy 12 hello-world
   arianet baas functions deploy 12 stripe-webhook --no-verify-jwt
   arianet baas functions deploy 12`,
-		Args: cobra.MinimumNArgs(1),
+		Args: projectArgsRange(0, -1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 0, -1)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			if noVerifyJWT && verifyJWT {
 				return fmt.Errorf("--verify-jwt and --no-verify-jwt cannot be combined")
 			}
@@ -661,19 +663,20 @@ func (p *product) baasFunctionsDownloadCmd(dirOf func() string) *cobra.Command {
 	var version int
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "download <project-id> <name>",
+		Use:   "download [project-id] <name>",
 		Short: "Download a deployed function's code into " + defaultFunctionsDir + "/",
 		Long: `Download the bundle of the active version (or --version) and unpack it into the functions
 folder: <name>/... and the shared _ folders it was deployed with. Existing files are not
 overwritten unless --force. Needs the baas:functions:manage scope.`,
 		Example: `  arianet baas functions download 12 hello-world
   arianet baas functions download 12 hello-world --version 2 --force`,
-		Args: cobra.ExactArgs(2),
+		Args: projectArgsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 1, 1)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			name := strings.TrimSpace(args[1])
 			if err := validateFunctionName(name); err != nil {
 				return err
@@ -729,15 +732,16 @@ func (p *product) baasFunctionsSecretsCmd() *cobra.Command {
 	secretsPath := func(id string) string { return "/projects/" + id + "/functions/secrets" }
 
 	list := &cobra.Command{
-		Use:     "list <project-id>",
+		Use:     "list [project-id]",
 		Aliases: []string{"ls"},
 		Short:   "List the secrets' names and digests (values are never shown)",
-		Args:    cobra.ExactArgs(1),
+		Args:    projectArgsRange(0, 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 0, 0)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			cc := p.client()
 			if cc == nil {
 				return nil
@@ -754,7 +758,7 @@ func (p *product) baasFunctionsSecretsCmd() *cobra.Command {
 
 	var envFile string
 	set := &cobra.Command{
-		Use:   "set <project-id> [NAME=VALUE...]",
+		Use:   "set [project-id] [NAME=VALUE...]",
 		Short: "Create or replace secrets (functions read them as environment variables)",
 		Long: `Create or replace secrets: give NAME=VALUE pairs, an --env-file of NAME=VALUE lines, or both
 (the arguments win). Names are letters, digits and _, not starting with a digit or with ARIANET_;
@@ -762,12 +766,13 @@ a value is at most 64 KiB. Running functions see the change within about 30 seco
 baas:functions:manage scope.`,
 		Example: `  arianet baas functions secrets set 12 STRIPE_KEY=sk_live_123 MAIL_FROM=noreply@example.com
   arianet baas functions secrets set 12 --env-file arianet/functions/.env`,
-		Args: cobra.MinimumNArgs(1),
+		Args: projectArgsRange(0, -1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 0, -1)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			var pairs [][2]string
 			if envFile != "" {
 				if pairs, err = readEnvFile(envFile); err != nil {
@@ -826,16 +831,17 @@ baas:functions:manage scope.`,
 	set.Flags().StringVar(&envFile, "env-file", "", "read NAME=VALUE lines from this file")
 
 	unset := &cobra.Command{
-		Use:     "unset <project-id> <NAME>...",
+		Use:     "unset [project-id] <NAME>...",
 		Aliases: []string{"delete", "rm"},
 		Short:   "Delete secrets",
 		Example: "  arianet baas functions secrets unset 12 STRIPE_KEY --yes",
-		Args:    cobra.MinimumNArgs(2),
+		Args:    projectArgsRange(1, -1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 1, -1)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			names := args[1:]
 			for _, n := range names {
 				if err := validateSecretName(n); err != nil {

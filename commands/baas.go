@@ -46,9 +46,10 @@ var baasKeyKinds = []string{"anon", "service", "publishable", "secret", "databas
 
 func newBaaSCmd() *cobra.Command {
 	var apiBase string
-	p := &product{name: "arianet baas", prefix: api.BaaSPrefix, actions: true,
-		scopes: "baas:projects:read (reads), baas:projects:manage (create, rename, delete, pause, resume, plan), " +
-			"baas:keys:manage (keys reveal and rotate, env), baas:sql:execute (sql, db push), " +
+	p := &product{name: "arianet baas", prefix: api.BaaSPrefix, actions: true, linkProject: true,
+		scopes: "baas:projects:read (reads, incl. migration list, db pull and diff, gen types, advisors), " +
+			"baas:projects:manage (create, rename, delete, pause, resume, plan, domains, transfer, api-settings set), " +
+			"baas:keys:manage (keys reveal and rotate, env), baas:sql:execute (sql, db push, db pull --mark-applied), " +
 			"baas:storage:manage (storage writes), baas:auth-users:manage (auth users create and delete), " +
 			"baas:functions:manage (functions deploy, delete, download and secrets changes)",
 		base: func() string {
@@ -61,6 +62,9 @@ func newBaaSCmd() *cobra.Command {
 		`Arianet BaaS: each project is a PostgreSQL database with a public endpoint (REST, auth,
 storage) and its keys. Create and manage projects, run SQL, apply migrations from files,
 generate TypeScript types, deploy edge functions, and print the environment your app needs.
+
+Run arianet baas link in your app's directory once: the project ID, the first argument of
+the project commands, can then be left out there. Migration files live in arianet/migrations.
 
 Projects run in region thr-1.`)
 	cmd.PersistentFlags().StringVar(&apiBase, "api-base", "", "call this BaaS /v1 address directly instead of the gateway (development)")
@@ -131,14 +135,22 @@ Projects run in region thr-1.`)
 				{header: "Database bytes", key: "limits.db_bytes"}, {header: "Storage bytes", key: "limits.storage_bytes"},
 				{header: "Monthly users", key: "limits.mau"}, {header: "Projects", key: "limits.max_projects_per_account"}}}),
 		projects, keys,
+		p.baasLinkCmd(),
+		p.baasUnlinkCmd(),
 		p.baasSQLCmd(),
+		p.baasMigrationCmd(),
 		p.baasDBCmd(),
-		p.baasTypesCmd(),
+		p.baasGenCmd(),
+		p.baasTypesCmd("types [project-id]", "ts", "Alias of gen types: generate TypeScript types of the database"),
 		p.baasEnvCmd(),
 		p.baasStorageCmd(),
 		auth,
 		p.baasFunctionsCmd(),
 		p.baasLogsCmd(),
+		p.baasAdvisorsCmd(),
+		p.baasDomainsCmd(),
+		p.baasTransferCmd(),
+		p.baasAPISettingsCmd(),
 		p.command(endpoint{use: "usage <project-id>", short: "Show this month's use against the plan", method: http.MethodGet,
 			path: "/projects/{0}/usage", nargs: 1, render: renderBaaSUsage}),
 		p.actionsCmd(),
@@ -161,15 +173,16 @@ func projectID(arg string) (string, error) {
 func (p *product) baasPlanCmd() *cobra.Command {
 	var w waitFlags
 	cmd := &cobra.Command{
-		Use:     "plan <project-id> <plan-code>",
+		Use:     "plan [project-id] <plan-code>",
 		Short:   "Move a project to another plan (billed from now)",
 		Example: "  arianet baas projects plan 12 pro",
-		Args:    cobra.ExactArgs(2),
+		Args:    projectArgsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 1, 1)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			cc := p.client()
 			if cc == nil {
 				return nil
@@ -220,16 +233,17 @@ func (p *product) baasLogsCmd() *cobra.Command {
 	var limit, status int
 	var before int64
 	cmd := &cobra.Command{
-		Use:   "logs <project-id>",
+		Use:   "logs [project-id]",
 		Short: "Show the project's request logs (last 7 days) and SQL editor runs",
 		Example: `  arianet baas logs 12 --since 1h
   arianet baas logs 12 --source auth --status 4 --limit 50`,
-		Args: cobra.ExactArgs(1),
+		Args: projectArgsRange(0, 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 0, 0)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			q := url.Values{}
 			if source != "" {
 				q.Set("source", source)
@@ -287,7 +301,7 @@ func (p *product) baasStorageCmd() *cobra.Command {
 		method: http.MethodGet, path: "/projects/{0}/storage/buckets", nargs: 1,
 		cols: []col{{header: "Name", key: "name"}, {header: "Public", key: "public"}, {header: "Size limit", key: "file_size_limit"},
 			{header: "Types", key: "allowed_mime_types"}, {header: "Created", key: "created_at"}}})
-	buckets.Args = cobra.ExactArgs(1)
+	buckets.Args = projectArgsRange(0, 0)
 	buckets.AddCommand(
 		p.command(endpoint{use: "create <project-id>", short: "Create a bucket", method: http.MethodPost, path: "/projects/{0}/storage/buckets", nargs: 1,
 			done: "Bucket created.", example: "  arianet baas storage buckets create 12 --name avatars --public",
@@ -305,15 +319,16 @@ func (p *product) baasStorageCmd() *cobra.Command {
 
 	var lsLimit, lsOffset int
 	ls := &cobra.Command{
-		Use:     "ls <project-id> <bucket> [prefix]",
+		Use:     "ls [project-id] <bucket> [prefix]",
 		Aliases: []string{"list"},
 		Short:   "List a folder of a bucket",
-		Args:    cobra.RangeArgs(2, 3),
+		Args:    projectArgsRange(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 1, 2)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			q := url.Values{}
 			if len(args) == 3 {
 				q.Set("prefix", args[2])
@@ -344,16 +359,17 @@ func (p *product) baasStorageCmd() *cobra.Command {
 	var upsert bool
 	var contentType string
 	upload := &cobra.Command{
-		Use:     "upload <project-id> <bucket> <local-file> [object-path]",
+		Use:     "upload [project-id] <bucket> <local-file> [object-path]",
 		Aliases: []string{"put", "cp"},
 		Short:   "Upload a file (the object path defaults to the file's name)",
 		Example: "  arianet baas storage upload 12 avatars ./me.png users/42/me.png --upsert",
-		Args:    cobra.RangeArgs(3, 4),
+		Args:    projectArgsRange(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 2, 3)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			local := args[2]
 			object := filepath.Base(local)
 			if len(args) == 4 {
@@ -400,15 +416,16 @@ func (p *product) baasStorageCmd() *cobra.Command {
 	upload.Flags().StringVar(&contentType, "content-type", "", "content type to store (default: from the file extension)")
 
 	download := &cobra.Command{
-		Use:     "download <project-id> <bucket> <object-path> [local-file]",
+		Use:     "download [project-id] <bucket> <object-path> [local-file]",
 		Aliases: []string{"get"},
 		Short:   "Download an object (to the object's file name, or - for standard output)",
-		Args:    cobra.RangeArgs(3, 4),
+		Args:    projectArgsRange(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 2, 3)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			object := strings.TrimPrefix(args[2], "/")
 			local := filepath.Base(object)
 			if len(args) == 4 {
@@ -452,15 +469,16 @@ func (p *product) baasStorageCmd() *cobra.Command {
 	}
 
 	rm := &cobra.Command{
-		Use:     "rm <project-id> <bucket> <object-path>...",
+		Use:     "rm [project-id] <bucket> <object-path>...",
 		Aliases: []string{"delete"},
 		Short:   "Delete objects",
-		Args:    cobra.MinimumNArgs(3),
+		Args:    projectArgsRange(2, -1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 2, -1)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			paths := make([]string, 0, len(args)-2)
 			for _, a := range args[2:] {
 				paths = append(paths, strings.TrimPrefix(a, "/"))
@@ -511,7 +529,7 @@ var baasEnvAliases = []string{"NEXT_PUBLIC_BAAS", "VITE_BAAS", "NUXT_PUBLIC_BAAS
 func (p *product) baasEnvCmd() *cobra.Command {
 	var format string
 	cmd := &cobra.Command{
-		Use:   "env <project-id>",
+		Use:   "env [project-id]",
 		Short: "Print the URL and anon key your app needs, as .env lines or JSON",
 		Long: `Print the project's endpoint and its anon key (revealed, which needs baas:keys:manage and
 is recorded in your activity log) as ARIANET_BAAS_URL and ARIANET_BAAS_ANON_KEY, plus the same
@@ -528,12 +546,13 @@ constructor from these variables. The anon key is safe in browser code (row leve
 decides what it can read); never put the service or secret key there.`,
 		Example: `  arianet baas env 12 > .env.local
   arianet baas env 12 --format json`,
-		Args: cobra.ExactArgs(1),
+		Args: projectArgsRange(0, 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := projectID(args[0])
+			args, err := withProject(args, 0, 0)
 			if err != nil {
 				return err
 			}
+			id := args[0]
 			if format == "" && jsonMode() {
 				format = "json"
 			}

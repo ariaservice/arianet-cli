@@ -232,6 +232,9 @@ func (db *fakeMigrationsDB) handler(t *testing.T) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		db.mu.Lock()
 		defer db.mu.Unlock()
+		if baasOlderRegion(w, r) {
+			return
+		}
 		if r.URL.Path != "/baas/v1/projects/12/sql" {
 			t.Errorf("path %s", r.URL.Path)
 		}
@@ -364,8 +367,23 @@ const baasProfilesDetail = `{"data":{"schema":"public","name":"profiles","kind":
 	"primary_key":["id"],"constraints":[{"name":"profiles_pkey","type":"primary_key","columns":["id"],"definition":"PRIMARY KEY (id)"}],
 	"indexes":[],"policies":[],"triggers":[]}}`
 
+// baasOlderRegion answers like a region without the schema, types and
+// migrations endpoints: 404.
+func baasOlderRegion(w http.ResponseWriter, r *http.Request) bool {
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/migrations"), strings.HasSuffix(r.URL.Path, "/schema"), strings.HasSuffix(r.URL.Path, "/types/typescript"):
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":"Not found.","code":"not_found"}`)
+		return true
+	}
+	return false
+}
+
 func baasIntrospection(t *testing.T) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if baasOlderRegion(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/baas/v1/projects/12/tables":
 			if r.URL.Query().Get("schema") != "public" {
@@ -707,5 +725,505 @@ func TestBaaSAPIBaseCallsTheServiceDirectly(t *testing.T) {
 	}
 	if err := config.ValidateAPIURL("http://baas.example/v1"); err == nil {
 		t.Error("plain http to a remote host must be refused")
+	}
+}
+
+// ─── link, migrations, schema, types (#1149) ─────────────────────────────────
+
+// inTempDir runs the rest of the test in a new empty directory.
+func inTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	return dir
+}
+
+// runCapturedErr is runCaptured that returns the command's error.
+func runCapturedErr(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout = w
+	devNull, _ := os.Open(os.DevNull)
+	os.Stderr = devNull
+	var out []byte
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		out, _ = io.ReadAll(r)
+	}()
+	cmd := newBaaSCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	runErr := cmd.Execute()
+	_ = w.Close()
+	wg.Wait()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	_ = devNull.Close()
+	return string(out), runErr
+}
+
+func TestBaaSLinkLetsTheProjectIDBeLeftOut(t *testing.T) {
+	inTempDir(t)
+	var got []string
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/baas/v1/projects/12":
+			_, _ = io.WriteString(w, `{"data":`+baasProjectJSON+`}`)
+		case "/baas/v1/projects/12/sql":
+			if body := baasBody(t, r); body["query"] != "select 1" {
+				t.Errorf("query %v", body)
+			}
+			_, _ = io.WriteString(w, baasSQLAnswer)
+		default:
+			_, _ = io.WriteString(w, `{"data":[]}`)
+		}
+	})
+	runCaptured(t, newBaaSCmd(), "link", "12")
+	b, err := os.ReadFile(filepath.Join("arianet", ".baas", "project.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var l baasLink
+	if err := json.Unmarshal(b, &l); err != nil || l.ProjectID != "12" || l.Ref != "abcdefghij0123456789" || l.Name != "shop" ||
+		l.Endpoint != "https://abcdefghij0123456789.baas.example" || l.Region != "thr-1" {
+		t.Fatalf("link file %s (%v)", b, err)
+	}
+
+	got = nil
+	runCaptured(t, newBaaSCmd(), "keys", "list")
+	runCaptured(t, newBaaSCmd(), "keys", "list", "13")
+	runCaptured(t, newBaaSCmd(), "sql", "select 1")
+	runCaptured(t, newBaaSCmd(), "storage", "ls", "avatars", "users/")
+	runCaptured(t, newBaaSCmd(), "storage", "buckets")
+	runCaptured(t, newBaaSCmd(), "projects", "plan", "pro")
+	want := []string{"GET /baas/v1/projects/12/keys", "GET /baas/v1/projects/13/keys", "POST /baas/v1/projects/12/sql",
+		"GET /baas/v1/projects/12/storage/buckets/avatars/objects", "GET /baas/v1/projects/12/storage/buckets", "PUT /baas/v1/projects/12/plan"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("requests\n%v\nwant\n%v", got, want)
+	}
+
+	runCaptured(t, newBaaSCmd(), "unlink")
+	if _, err := os.Stat(filepath.Join("arianet", ".baas", "project.json")); !os.IsNotExist(err) {
+		t.Errorf("unlink keeps the file: %v", err)
+	}
+	if err := baasRunErr(t, "keys", "list"); err == nil || !strings.Contains(err.Error(), "baas link") {
+		t.Errorf("unlinked: %v", err)
+	}
+}
+
+func TestBaaSLinkByRefOrTheOnlyProject(t *testing.T) {
+	inTempDir(t)
+	projects := `{"data":[` + baasProjectJSON + `,{"id":"13","ref":"zzzzzzzzzz0123456789","name":"blog"}]}`
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/baas/v1/projects" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, projects)
+	})
+	runCaptured(t, newBaaSCmd(), "link", "zzzzzzzzzz0123456789")
+	if l, err := readBaaSLink(); err != nil || l == nil || l.ProjectID != "13" || l.Name != "blog" {
+		t.Fatalf("link %+v (%v)", l, err)
+	}
+	if _, err := runCapturedErr(t, "link"); err == nil || !strings.Contains(err.Error(), "you have 2 projects") {
+		t.Errorf("two projects: %v", err)
+	}
+	if _, err := runCapturedErr(t, "link", "nosuchref"); err == nil || !strings.Contains(err.Error(), "no project has the ref") {
+		t.Errorf("unknown ref: %v", err)
+	}
+	projects = `{"data":[` + baasProjectJSON + `]}`
+	runCaptured(t, newBaaSCmd(), "link")
+	if l, _ := readBaaSLink(); l == nil || l.ProjectID != "12" {
+		t.Errorf("the only project is linked: %+v", l)
+	}
+}
+
+func TestBaaSSplitProject(t *testing.T) {
+	inTempDir(t)
+	cases := []struct {
+		args          []string
+		minRest, max  int
+		id, rest, err string
+	}{
+		{[]string{"12", "anon"}, 1, 1, "12", "anon", ""},
+		{[]string{"1x", "anon"}, 1, 1, "", "", "invalid project ID"},
+		{[]string{"anon"}, 1, 1, "", "", "baas link"},
+		{[]string{"12", "b", "p"}, 1, 2, "12", "b,p", ""},
+		{[]string{"12"}, 0, 1, "12", "", ""},
+		{[]string{"12", "a", "b", "c"}, 1, 1, "", "", "expected the project ID"},
+	}
+	for _, c := range cases {
+		id, rest, err := splitProject(c.args, c.minRest, c.max)
+		if c.err != "" {
+			if err == nil || !strings.Contains(err.Error(), c.err) {
+				t.Errorf("%v: err %v, want %q", c.args, err, c.err)
+			}
+			continue
+		}
+		if err != nil || id != c.id || strings.Join(rest, ",") != c.rest {
+			t.Errorf("%v: %q %v %v", c.args, id, rest, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join("arianet", ".baas"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(baasLinkFile, []byte(`{"project_id":"44","name":"x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if id, rest, err := splitProject([]string{"anon"}, 1, 1); err != nil || id != "44" || rest[0] != "anon" {
+		t.Errorf("linked: %q %v %v", id, rest, err)
+	}
+	if id, _, err := splitProject(nil, 0, 0); err != nil || id != "44" {
+		t.Errorf("linked, no args: %q %v", id, err)
+	}
+}
+
+func TestBaaSMigrationNew(t *testing.T) {
+	inTempDir(t)
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) { t.Error("nothing is sent") })
+	out := runCaptured(t, newBaaSCmd(), "migration", "new", "Create todosTable")
+	entries, err := os.ReadDir(filepath.Join("arianet", "migrations"))
+	if err != nil || len(entries) != 1 || !regexp.MustCompile(`^\d{14}_create_todos_table\.sql$`).MatchString(entries[0].Name()) {
+		t.Fatalf("files %v (%v)", entries, err)
+	}
+	if !strings.Contains(out, entries[0].Name()) {
+		t.Errorf("output %q", out)
+	}
+	text, _ := os.ReadFile(filepath.Join("arianet", "migrations", entries[0].Name()))
+	if !strings.HasPrefix(string(text), "-- Migration create_todos_table, created by arianet baas migration new at ") {
+		t.Errorf("header %q", text)
+	}
+	if err := baasRunErr(t, "migration", "new", "--"); err == nil {
+		t.Error("an empty name is refused")
+	}
+
+	// A project that still keeps ./migrations (the old default) gets its files there.
+	inTempDir(t)
+	if err := os.Mkdir("migrations", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runCaptured(t, newBaaSCmd(), "migration", "new", "add_done")
+	if m, _ := filepath.Glob(filepath.Join("migrations", "*_add_done.sql")); len(m) != 1 {
+		t.Errorf("legacy dir: %v", m)
+	}
+	if snakeName("AddDone column!") != "add_done_column" || snakeName("v2 users") != "v2_users" {
+		t.Error("snakeName")
+	}
+}
+
+const (
+	migA = "create table a (id int);"
+	migB = "create table b (id int);"
+	migC = "create table c (id int);"
+)
+
+// writeProjectMigrations writes arianet/migrations of the current directory.
+func writeProjectMigrations(t *testing.T, files map[string]string) {
+	t.Helper()
+	dir := filepath.Join("arianet", "migrations")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func baasHistory(entries ...[2]string) string {
+	items := make([]string, len(entries))
+	for i, e := range entries {
+		items[i] = fmt.Sprintf(`{"name":%q,"checksum":%q,"applied_at":"2026-11-21T09:00:00Z"}`, e[0], e[1])
+	}
+	return `{"data":[` + strings.Join(items, ",") + `]}`
+}
+
+func TestBaaSMigrationList(t *testing.T) {
+	inTempDir(t)
+	writeProjectMigrations(t, map[string]string{"001_a.sql": migA, "002_b.sql": migB + " -- edited", "003_c.sql": migC})
+	productTestServer(t, "json", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/baas/v1/projects/12/migrations" {
+			t.Errorf("%s %s", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, baasHistory([2]string{"000_old.sql", "ff"}, [2]string{"001_a.sql", checksum([]byte(migA))},
+			[2]string{"002_b.sql", checksum([]byte(migB))}))
+	})
+	out := runCaptured(t, newBaaSCmd(), "migration", "list", "12")
+	var list []migrationStatus
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	var got []string
+	for _, m := range list {
+		got = append(got, fmt.Sprintf("%s:%t:%s", m.Name, m.Local, m.Status))
+	}
+	want := "000_old.sql:false:remote only|001_a.sql:true:applied|002_b.sql:true:changed|003_c.sql:true:pending"
+	if strings.Join(got, "|") != want {
+		t.Errorf("statuses %v", got)
+	}
+
+	cfg.Output, outputFormat = "table", "table"
+	out = runCaptured(t, newBaaSCmd(), "migration", "list", "12")
+	for _, s := range []string{"APPLIED AT", "remote only", "changed", "pending", "2026-11-21T09:00:00Z", "003_c.sql"} {
+		if !strings.Contains(out, s) {
+			t.Errorf("table lacks %q:\n%s", s, out)
+		}
+	}
+}
+
+func TestBaaSDBPushThroughTheEndpoint(t *testing.T) {
+	inTempDir(t)
+	writeProjectMigrations(t, map[string]string{"002_b.sql": migB, "001_a.sql": migA, "notes.txt": "x"})
+	var bodies []map[string]any
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/baas/v1/projects/12/migrations" {
+			t.Errorf("%s %s", r.Method, r.URL.Path)
+		}
+		body := baasBody(t, r)
+		bodies = append(bodies, body)
+		if body["dry_run"] == true {
+			_, _ = io.WriteString(w, `{"data":{"dry_run":true,"applied":[],"skipped":["001_a.sql"],"pending":["002_b.sql"]}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":{"dry_run":false,"applied":["002_b.sql"],"skipped":["001_a.sql"],"pending":[]}}`)
+	})
+	out := runCaptured(t, newBaaSCmd(), "db", "push", "12", "--dry-run")
+	if !strings.Contains(out, "Would apply 1 migration(s)") || !strings.Contains(out, "002_b.sql") {
+		t.Errorf("dry run:\n%s", out)
+	}
+	out = runCaptured(t, newBaaSCmd(), "db", "push", "12")
+	if !strings.Contains(out, "Applied 002_b.sql") || !strings.Contains(out, "Applied 1 migration(s) in one transaction") {
+		t.Errorf("push:\n%s", out)
+	}
+	if len(bodies) != 2 || bodies[0]["dry_run"] != true || bodies[1]["dry_run"] != false {
+		t.Fatalf("bodies %v", bodies)
+	}
+	files, _ := bodies[1]["migrations"].([]any)
+	if len(files) != 2 {
+		t.Fatalf("files %v", bodies[1])
+	}
+	first, _ := files[0].(map[string]any)
+	second, _ := files[1].(map[string]any)
+	if first["name"] != "001_a.sql" || first["sql"] != migA || second["name"] != "002_b.sql" || len(first) != 2 {
+		t.Errorf("files in name order with their SQL: %v", files)
+	}
+}
+
+func TestBaaSDBPushRefusals(t *testing.T) {
+	inTempDir(t)
+	writeProjectMigrations(t, map[string]string{"001_a.sql": migA})
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"A recorded migration has changed.","code":"migration_changed","migration":"001_a.sql"}`)
+	})
+	err := baasRunErr(t, "db", "push", "12")
+	if err == nil || !strings.Contains(err.Error(), "001_a.sql") || !strings.Contains(err.Error(), "nothing was applied") {
+		t.Errorf("409: %v", err)
+	}
+
+	inTempDir(t)
+	if err := baasRunErr(t, "db", "push", "12"); err == nil || !strings.Contains(err.Error(), "no migrations directory") {
+		t.Errorf("no dir: %v", err)
+	}
+
+	sqlErr := &api.APIError{Status: 422, Code: "sql_error", Body: json.RawMessage(`{"error":"x","code":"sql_error","migration":"002_b.sql",
+		"sql_error":{"sqlstate":"42601","message":"syntax error","statement":0}}`)}
+	if errorField(sqlErr, "migration") != "002_b.sql" || sqlErrorOf(sqlErr) == nil || sqlErrorOf(sqlErr).SQLState != "42601" {
+		t.Error("the failing migration and its SQL error are read from the 422")
+	}
+}
+
+func TestBaaSDBPullThroughTheEndpoint(t *testing.T) {
+	inTempDir(t)
+	const ddl = "CREATE TABLE public.todos (\n  id bigint NOT NULL\n);\nCREATE VIEW public.open_todos AS SELECT 1;\n"
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/baas/v1/projects/12/schema" || r.URL.Query().Get("schemas") != "public,app" {
+			t.Errorf("%s ?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		_, _ = fmt.Fprintf(w, `{"data":{"schemas":["public","app"],"sql":%q,"checksum":"abc","generated_at":"2026-11-21T09:00:00Z"}}`, ddl)
+	})
+	out := runCaptured(t, newBaaSCmd(), "db", "pull", "12", "--schema", "public,app", "--file", "-")
+	if !strings.HasPrefix(out, "-- Schema public, app of Arianet BaaS project 12") || !strings.HasSuffix(out, ddl) {
+		t.Errorf("snapshot:\n%s", out)
+	}
+	runCaptured(t, newBaaSCmd(), "db", "pull", "12", "--schema", "public", "--schema", "app")
+	m, _ := filepath.Glob(filepath.Join("arianet", "migrations", "*_remote_schema.sql"))
+	if len(m) != 1 {
+		t.Fatalf("files %v", m)
+	}
+	if b, _ := os.ReadFile(m[0]); !strings.HasSuffix(string(b), ddl) {
+		t.Errorf("file %s", b)
+	}
+}
+
+func TestBaaSDBDiff(t *testing.T) {
+	inTempDir(t)
+	snapshot := "-- Schema public of Arianet BaaS project 12, written by arianet baas db pull at 2026-11-20T00:00:00Z.\n\n" +
+		"CREATE TABLE public.a (\n  id integer\n);\nCREATE TABLE public.b (\n  id integer\n);\n"
+	writeProjectMigrations(t, map[string]string{"001_a.sql": migA, "20261120000000_remote_schema.sql": snapshot})
+	remoteSQL := "-- generated 2026-11-21\nCREATE TABLE public.a (\n  id integer\n);  \nCREATE TABLE public.b (\n  id integer\n);\n\n"
+	history := baasHistory([2]string{"001_a.sql", checksum([]byte(migA))}, [2]string{"20261120000000_remote_schema.sql", checksum([]byte(snapshot))})
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/baas/v1/projects/12/migrations":
+			_, _ = io.WriteString(w, history)
+		case "/baas/v1/projects/12/schema":
+			_, _ = fmt.Fprintf(w, `{"data":{"schemas":["public"],"sql":%q}}`, remoteSQL)
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+	})
+	out, err := runCapturedErr(t, "db", "diff", "12")
+	if err != nil || !strings.Contains(out, "every file") || !strings.Contains(out, "matches") {
+		t.Fatalf("no difference: %v\n%s", err, out)
+	}
+
+	remoteSQL = "CREATE TABLE public.a (\n  id integer,\n  done boolean\n);\nCREATE TABLE public.b (\n  id integer\n);\n"
+	writeProjectMigrations(t, map[string]string{"002_c.sql": migC})
+	out, err = runCapturedErr(t, "db", "diff", "12")
+	if exitCode(err) != exitCodeDifferences {
+		t.Fatalf("exit %d (%v)", exitCode(err), err)
+	}
+	for _, want := range []string{"002_c.sql", "pending", "--- arianet/migrations/20261120000000_remote_schema.sql", "+++ project 12 (public)",
+		"@@ -1,5 +1,6 @@", "-  id integer\n+  id integer,\n+  done boolean\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff lacks %q:\n%s", want, out)
+		}
+	}
+
+	cfg.Output, outputFormat = "json", "json"
+	out, err = runCapturedErr(t, "db", "diff", "12")
+	var rep diffReport
+	if exitCode(err) != exitCodeDifferences || json.Unmarshal([]byte(out), &rep) != nil || !rep.Differences || rep.Schema.Identical ||
+		len(rep.Migrations) != 1 || rep.Migrations[0].Name != "002_c.sql" || rep.Schema.Against == nil {
+		t.Errorf("json %v: %s", err, out)
+	}
+}
+
+func TestBaaSUnifiedDiff(t *testing.T) {
+	a := strings.Split("a b c d e f g h i j k l m", " ")
+	b := strings.Split("a b X d e f g h i j k l m Y", " ")
+	want := "--- old\n+++ new\n@@ -1,6 +1,6 @@\n a\n b\n-c\n+X\n d\n e\n f\n@@ -11,3 +11,4 @@\n k\n l\n m\n+Y\n"
+	if got := unifiedDiff("old", "new", a, b); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+	if unifiedDiff("old", "new", a, a) != "" {
+		t.Error("same lines: no diff")
+	}
+	if got := unifiedDiff("x", "y", nil, []string{"one"}); got != "--- x\n+++ y\n@@ -0,0 +1,1 @@\n+one\n" {
+		t.Errorf("from empty: %q", got)
+	}
+	ops := diffLines(strings.Split("q w e r t y", " "), strings.Split("w q e t y u", " "))
+	var ra, rb []string
+	for _, op := range ops {
+		if op.kind != '+' {
+			ra = append(ra, op.line)
+		}
+		if op.kind != '-' {
+			rb = append(rb, op.line)
+		}
+	}
+	if strings.Join(ra, " ") != "q w e r t y" || strings.Join(rb, " ") != "w q e t y u" {
+		t.Errorf("the script does not rebuild both sides: %v", ops)
+	}
+}
+
+func TestBaaSGenTypes(t *testing.T) {
+	inTempDir(t)
+	const ts = "export type Json = string\nexport type Database = { public: {} }\n"
+	var calls int
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/baas/v1/projects/12/types/typescript" || r.URL.Query().Get("schemas") != "public" {
+			t.Errorf("%s ?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		_, _ = fmt.Fprintf(w, `{"data":{"lang":"typescript","schemas":["public"],"types":%q}}`, ts)
+	})
+	if out := runCaptured(t, newBaaSCmd(), "gen", "types", "12", "--lang", "typescript"); out != ts {
+		t.Errorf("stdout %q", out)
+	}
+	runCaptured(t, newBaaSCmd(), "gen", "types", "12", "--file", filepath.Join("src", "database.types.ts"))
+	if b, err := os.ReadFile(filepath.Join("src", "database.types.ts")); err != nil || string(b) != ts {
+		t.Errorf("file %q (%v)", b, err)
+	}
+	if out := runCaptured(t, newBaaSCmd(), "types", "12"); out != ts {
+		t.Errorf("the types alias calls the endpoint too: %q", out)
+	}
+	if calls != 3 {
+		t.Errorf("calls %d", calls)
+	}
+	if err := baasRunErr(t, "gen", "types", "12", "--lang", "python"); err == nil {
+		t.Error("only typescript")
+	}
+}
+
+func TestBaaSAdvisorsDomainsTransferAPISettings(t *testing.T) {
+	var got []string
+	productTestServer(t, "table", api.BaaSPrefix, func(w http.ResponseWriter, r *http.Request) {
+		body := baasBody(t, r)
+		got = append(got, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" "+fmt.Sprint(body))
+		switch {
+		case strings.Contains(r.URL.Path, "/advisors"):
+			_, _ = io.WriteString(w, `{"data":{"run":{"id":1,"trigger":"manual","status":"ok","error_code":null,"finished_at":"2026-11-21T09:00:00Z"},
+				"counts":{"security":{"ERROR":1,"WARN":0,"INFO":0},"performance":{"ERROR":0,"WARN":0,"INFO":0}},
+				"lints":[{"name":"rls_disabled_in_public","title":"RLS disabled","level":"ERROR","category":"security","detail":"todos has no RLS",
+				"object":{"type":"table","schema":"public","name":"todos"},"remediation":"Enable RLS","sql":"ALTER TABLE public.todos ENABLE ROW LEVEL SECURITY;"}]}}`)
+		case strings.HasSuffix(r.URL.Path, "/domains") && r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, `{"data":{"limit":1,"plan_allows":true,"target":"abc.baas.arianet.app","domains":[{"id":7,"hostname":"api.example.com",
+				"state":"pending","records":[{"type":"CNAME","name":"api.example.com","value":"abc.baas.arianet.app","ok":false}]}]}}`)
+		case strings.Contains(r.URL.Path, "/domains") && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"data":{"id":7,"hostname":"api.example.com","state":"pending","records":[{"type":"TXT","name":"_arianet-verify.api.example.com","value":"arianet-verify=t","ok":true}]}}`)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			_, _ = io.WriteString(w, `{"data":{"id":5,"state":"pending","max_rows":500}}`)
+		}
+	})
+	out := runCaptured(t, newBaaSCmd(), "advisors", "12", "--kind", "security", "--run", "--details")
+	for _, want := range []string{"rls_disabled_in_public", "table public.todos", "Fix: Enable RLS", "ALTER TABLE public.todos ENABLE ROW LEVEL SECURITY;", "manual"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("advisors lack %q:\n%s", want, out)
+		}
+	}
+	out = runCaptured(t, newBaaSCmd(), "domains", "list", "12")
+	if !strings.Contains(out, "api.example.com") || !strings.Contains(out, "CNAME") || !strings.Contains(out, "missing") {
+		t.Errorf("domains:\n%s", out)
+	}
+	out = runCaptured(t, newBaaSCmd(), "domains", "add", "12", "api.example.com")
+	if !strings.Contains(out, "_arianet-verify.api.example.com") {
+		t.Errorf("add:\n%s", out)
+	}
+	runCaptured(t, newBaaSCmd(), "domains", "check", "12", "7")
+	runCaptured(t, newBaaSCmd(), "domains", "remove", "12", "7", "--yes")
+	runCaptured(t, newBaaSCmd(), "transfer", "12", "--to", "123", "--confirm", "abcdefghij0123456789")
+	runCaptured(t, newBaaSCmd(), "transfer", "accept", "5")
+	runCaptured(t, newBaaSCmd(), "api-settings", "set", "12", "--max-rows", "500")
+	want := []string{
+		"POST /baas/v1/projects/12/advisors/run?kind=security map[]",
+		"GET /baas/v1/projects/12/domains? map[]",
+		"POST /baas/v1/projects/12/domains? map[hostname:api.example.com]",
+		"POST /baas/v1/projects/12/domains/7/check? map[]",
+		"DELETE /baas/v1/projects/12/domains/7? map[]",
+		"POST /baas/v1/projects/12/transfer? map[confirm:abcdefghij0123456789 target_account_id:123]",
+		"POST /baas/v1/transfers/5/accept? map[]",
+		"PUT /baas/v1/projects/12/settings/api? map[max_rows:500]",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("requests\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
